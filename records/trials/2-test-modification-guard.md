@@ -1,7 +1,18 @@
 # Trial — test-modification guard
 
 **Stage** 2 · **Started** 2026-09-03 · **Closed** — open
-**Where** `serina-mcfall/agent-verification-kit` · **Verdict** `fix`
+**Where** `serina-mcfall/agent-verification-kit`
+
+**Verdict — split, because the two halves have different evidence and one verdict
+would hide that:**
+
+| Half | Verdict | Why |
+|---|---|---|
+| `check-test-changes.sh` (CI) | **`keep`** | failed a real pull request with exit 1, naming the path — PR #1, run `33734157319` |
+| `test-guard.sh` (hook) | **`blocked`** | no plugin install has been observed; it has never fired from `${CLAUDE_PLUGIN_ROOT}` |
+
+A single verdict for "the test-modification guard" would have had to pick one of those and
+misreport the other. The template asks for one verdict per *mechanism*; this stage shipped two.
 
 ---
 
@@ -250,13 +261,86 @@ One thing, unchanged: **open a pull request from `trial/undeclared-test-change`*
 Until that job has run once, "this fails a PR that weakens a test" is a claim about a workflow file
 rather than an observation.
 
+---
+
+## Addendum 2 — the pull-request proof, 2026-09-03
+
+**PR #1** — `DO NOT MERGE: trial — undeclared test weakening`, draft, opened on the instruction
+*"yes open the trial PR"*. Branch `trial/undeclared-test-change` weakens
+`plugins/agent-verification-kit/hooks/test-test-guard.sh` by replacing its final
+`[ "$fail" -eq 0 ]` with `exit 0`, and declares nothing.
+
+Run `33734157319`:
+
+| Check | Result | Time |
+|---|---|---|
+| `controls (357)` | **pass** | 14s |
+| `undeclared test changes` | **fail** | 3s |
+
+The failing job's log ends `Process completed with exit code 1`, naming
+`plugins/agent-verification-kit/hooks/test-test-guard.sh`. **Exit 1, not exit 3** — a genuine
+refusal, not a could-not-determine dressed up as one. That was the specific risk written into the
+PR body before it ran, because `fetch-depth: 0` on a `pull_request` event was untested; it holds.
+
+An unplanned detail worth keeping: the log's copy-pasteable remedy shows the **corrected** single
+space, even though the trial branch predates that fix. `pull_request` checks out the merge commit,
+so the check ran against the merged result rather than the branch tip. Useful to know — it means
+this job answers "would main be broken if this merged", which is the more useful question, and it
+is not what a naive reading of the workflow would predict.
+
+### The most important line in that table is the one that passed
+
+**`controls` went green on a branch whose test suite can no longer fail.** The weakened suite still
+prints its `FAIL` lines and still exits 0, so CI reported success. That is not a defect in the
+workflow — it is the entire argument for this mechanism reading the *diff* rather than trusting the
+*result*, and it is the argument for Stage 4 as well: a guard that watches for changes cannot
+measure whether the assertions that survive still bite.
+
+Anyone quoting "CI was green" about that commit would have been quoting a suite that had been
+disabled.
+
+### Two defects the run surfaced, both fixed
+
+1. **The job was named `controls (357)`** and the suites held 362 by the time a pull request first
+   displayed it. A count typed into a label is a stale claim printed with authority. Renamed to
+   `controls`; the number is now only ever reported by running the suites.
+2. **`actions/checkout@v4` raised a Node 20 deprecation warning** on the runner. Bumped to `v5` in
+   both the workflow and the README snippet.
+
+### Disposal
+
+PR #1 stays **open as a draft** until a human closes it — it is the only live evidence of this
+check working, and closing it before the trial record is read would leave the record citing a run
+nobody can navigate to from the PR. It must never be merged.
+
+### Revised numbers
+
+| Field | Was | Now |
+|---|---|---|
+| `ci_seconds` | 0 | **17** (14s controls + 3s guard) |
+| `true_positives` | 3 | **5** (added the stale job-name count; the deprecated checkout) |
+| CI runs observed | 1 | **2** — `controls` on push, both jobs on a pull request |
+| plugin installs observed | 0 | 0 |
+
 ## Record it
 
 ```bash
 <skill>/record.sh --kind review \
-  --summary "test-modification guard: fix — survives every bypass, CI half never run on a PR" \
-  --tags ci/hooks,ci/required-checks,process/verification \
-  --field verdict=fix --field mechanism=test-modification-guard \
-  --field ci_seconds=0 --field false_positives=1 --field true_positives=3 \
+  --summary "check-test-changes: keep — failed a real PR with exit 1, naming the path" \
+  --tags ci/required-checks,process/verification \
+  --field verdict=keep --field mechanism=check-test-changes \
+  --field ci_seconds=17 --field false_positives=1 --field true_positives=5 \
+  --doc records/trials/2-test-modification-guard.md
+
+<skill>/record.sh --kind review \
+  --summary "test-guard hook: blocked — never fired from CLAUDE_PLUGIN_ROOT, no install observed" \
+  --tags ci/hooks,process/verification \
+  --field verdict=blocked --field mechanism=test-guard-hook \
+  --field ci_seconds=0 --field false_positives=0 --field true_positives=0 \
+  --doc records/trials/2-test-modification-guard.md
+
+<skill>/record.sh --kind note \
+  --summary "a weakened suite still goes green: CI passed on a branch whose tests cannot fail" \
+  --tags ci/flaky-tests,process/verification \
   --doc records/trials/2-test-modification-guard.md
 ```

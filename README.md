@@ -200,7 +200,7 @@ git commit -s --trailer "Test-change: tests/test_auth.py the assertion asserted 
 ### Wiring the CI half
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v5
   with:
     fetch-depth: 0          # REQUIRED — a shallow clone cannot resolve the base ref
 - run: bash plugins/agent-verification-kit/hooks/check-test-changes.sh origin/main

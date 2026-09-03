@@ -13,10 +13,15 @@ jobs:
   # The kit's own controls. If these do not run in CI, the kit is asking adopters
   # to trust a suite whose last known state was on the author's laptop.
   controls:
-    name: controls (357)
+    # NO COUNT IN THIS NAME. It said "controls (357)" for one commit, and by the
+    # time the first pull request displayed it the suites held 362. A number in a
+    # label that nothing updates is a stale claim printed with authority — the same
+    # defect class this kit spends its comments on. The suites report their own
+    # totals; that number is derived from running them, not typed.
+    name: controls
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: jq is present
         # test-guard.sh and the stamp hooks parse their payloads with jq, and both
@@ -62,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # NOT OPTIONAL. On a shallow clone the base ref does not resolve, the
           # diff comes back empty, and an empty diff is indistinguishable from
