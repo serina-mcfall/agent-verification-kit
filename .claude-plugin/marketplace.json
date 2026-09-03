@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "agent-verification-kit",
-  "description": "Test automation and verification for agentic coding. Ships hooks, not only skills — a skill can be argued with, a hook cannot.",
+  "description": "Test automation and verification for agentic coding. Ships hooks, not only skills — a skill is advice, a hook is a gate.",
   "owner": {
     "name": "Serina Mcfall",
     "email": "serina-mcfall@users.noreply.github.com"
@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "agent-verification-kit",
-      "description": "Evidence-required completion, enforced where the agent cannot argue with it. A commit is blocked unless a fresh verification stamp exists; the stamp is written only by a passing test or build command, is scoped to the repository being committed to, expires after 30 minutes, and is cleared by any file edit. Also validates that every agent definition in a commit names a model that actually resolves, because a typo'd model: does not fail at runtime — it 404s, retries, and silently falls back to the dispatching session's model.",
+      "description": "Evidence-required completion, enforced outside the agent's own judgement rather than by instructing it. A commit is blocked unless a fresh verification stamp exists; the stamp is written only by a passing test or build command, is scoped to the repository being committed to, expires after 30 minutes, and is cleared by any file edit. Also validates that every agent definition in a commit names a model that actually resolves, because a typo'd model: does not fail at runtime — it 404s, retries, and silently falls back to the dispatching session's model.",
       "source": "./plugins/agent-verification-kit",
       "category": "development"
     }

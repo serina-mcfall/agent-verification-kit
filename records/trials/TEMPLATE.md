@@ -65,13 +65,30 @@ reads as an oversight six months later.>
 | Field | Value | Notes |
 |---|---|---|
 | `ci_seconds` | | wall-clock added to the run |
-| `true_positives` | | real problems caught |
+| `true_positives` | | real problems **the mechanism itself caught** — see the rule below |
 | `false_positives` | | false alarms — **this field decides most verdicts** |
 | runs observed | | a verdict from one run is a guess |
 
 **The false-positive rule:** a mechanism that cries wolf is `fix` or `drop` *however correct it is in
 principle*. A gate people learn to ignore is the problem this programme exists to solve — shipping a
 noisy one makes things worse, not better.
+
+**The true-positive rule, ruled 2026-09-04 and written down here so it stops being re-litigated:**
+`true_positives` counts **only what the mechanism caught by firing.** A defect found by reading the
+code, by reviewing the diff, by eye while scrolling CI output, or by a human asking a good question
+is a **real finding and does not belong in this field.** Record it in the prose; leave the number
+alone.
+
+The reason is narrow and it is the reason this field exists at all. `true_positives` is read as
+evidence that *the mechanism works*, and it is weighed against `false_positives` to decide `keep`
+versus `fix` or `drop`. A finding the mechanism did not produce is evidence that **review** works —
+which is worth knowing, and is a different claim. Mixing the two inflates exactly the number a
+future stage will use as its baseline, and it inflates it in the flattering direction.
+
+Stages 1 and 2 were both scored against the looser reading, disputed for three consecutive records,
+and corrected under this rule: Stage 1 from `1` to `0`, Stage 2 from `5` to `3`. **A `0` here is not
+a failing grade.** Stage 1's mechanism was never given anything to catch — it was trialled, not run
+in anger — and its verdict is `keep` on other evidence entirely.
 
 ---
 

@@ -542,6 +542,68 @@ Both halves now hold `keep`, and **Stage 3 (`flake-triage`) is unblocked.**
 
 ---
 
+## Addendum 5 — the remaining matchers, and `true_positives` ruled, 2026-09-04
+
+### All four matchers are now covered
+
+Addendum 4 recorded that only `Edit` had been probed, and named `test-config`, `MultiEdit` and
+`NotebookEdit` as untested. All three have now been run.
+
+| Matcher | Path | How | Result |
+|---|---|---|---|
+| `Edit` | `tests/test_thing.py` | real tool call | **refused** — `is a test file` |
+| `Edit` | `playwright.config.ts` | real tool call | **refused** — `is test configuration` |
+| `NotebookEdit` | `tests/test_notebook.ipynb` | real tool call | **refused** — `is a test file` |
+| `MultiEdit` | `tests/test_notebook.ipynb` | direct payload | **refused**, exit 2, 914 bytes on stderr |
+| `MultiEdit` | `README.md` | direct payload | **allowed**, exit 0, silent — vacuity control |
+| `Write` | new `tests/test_notebook.ipynb` | real tool call | **allowed** — creation is free |
+
+`MultiEdit` was probed by payload rather than by a real call because that tool is not in this
+agent's toolset. **That is a weaker observation than the other three and is recorded as such**, not
+folded in with them.
+
+**The `NotebookEdit` row is the one that mattered.** Addendum 3's finding 3 was a `notebook_path`
+defect that let every notebook edit through silently, and until now the fix was covered only by
+section 10's synthetic payloads — a suite written against the implementation, which is precisely
+the failure mode that let the original defect survive 32 controls. It has now refused a **real**
+`NotebookEdit` call routed through the plugin.
+
+Two properties held live rather than in fixtures: the `tests/test_thing.py` declaration did **not**
+authorise `playwright.config.ts` (one path per declaration), and creating a new test file was not
+blocked even though its path classifies as `test`.
+
+**Still not probed:** deletion via `rm`, and any edit from outside this harness. Unchanged, stated
+blind spots, covered by the CI half.
+
+### `true_positives: 5` → `3`
+
+Ruled by Serina 2026-09-04, ending a dispute this record carried for three consecutive addenda. The
+rule is now in [`TEMPLATE.md`](TEMPLATE.md#the-numbers): **`true_positives` counts only what the
+mechanism caught by firing.**
+
+| # | Finding | Counts? |
+|---|---|---|
+| 1 | the silenced-warnings fail-open (`2>/dev/null`) | ✅ caught while writing the controls |
+| 2 | the added-file disagreement between the halves | ✅ caught by running the mechanism on real history |
+| 3 | the printed-remedy double space | ✅ caught by reading the mechanism's own output |
+| 4 | the stale `controls (357)` job name | ❌ noticed by eye while reading CI |
+| 5 | the deprecated `actions/checkout@v4` | ❌ noticed by eye while reading CI |
+
+Findings 4 and 5 remain in this record as findings. They are real, they were worth fixing, and both
+are still described in Addendum 2. What changes is that they no longer inflate the number a later
+stage will use as its baseline.
+
+| Field | Was | Now |
+|---|---|---|
+| `true_positives` | 5, disputed | **3** — ruled, no longer disputed |
+| `false_positives` | 1 | 1 |
+| everything else | | unchanged |
+
+`REV-0002` and `REV-0004` recorded `true_positives=5` for the CI half; `REV-0008` supersedes the
+current one with `3`. Neither verdict changes.
+
+---
+
 ## Record it
 
 ```bash

@@ -1,7 +1,15 @@
 # agent-verification-kit
 
-Test automation and verification for agentic coding. **Ships hooks, not only skills** — a skill
-can be argued with, a hook cannot.
+Test automation and verification for agentic coding. **Ships hooks, not only skills** — a skill is
+advice, a hook is a gate.
+
+> **This line used to read *"a skill can be argued with, a hook cannot."*** It was changed on
+> 2026-09-04 because this repository contains the evidence against it. `verify-gate.sh`'s header
+> records **six bypasses that got round it**, one of which meant the gate enforced nothing *for
+> months, silently*. A hook can absolutely be argued with. It just argues in code rather than in
+> prose, and it loses quietly instead of out loud — which is worse, not better. The distinction
+> worth keeping is that a hook runs whether or not the agent agrees with it; that is a gate, not an
+> unarguable one.
 
 When an AI agent writes, runs and validates code, the test suite stops being documentation with a
 safety net and becomes the agent's **reward signal**. Reward hacking is then not a worry, it is a
@@ -82,7 +90,19 @@ They are not hypotheticals. See *What the comments are for* below.
 ```bash
 /plugin marketplace add serina-mcfall/agent-verification-kit
 /plugin install agent-verification-kit@agent-verification-kit
+/reload-plugins
 ```
+
+**All three, and the third is not optional.** Adding a marketplace clones the repository so Claude
+Code can read the catalogue — every hook file lands on disk and **none of them is wired**. Installing
+registers the plugin. Only the reload attaches the hooks to a running session.
+
+Measured 2026-09-04, on the first install this kit ever had: an edit to an existing test file was
+allowed after `marketplace add`, allowed again after `install`, and refused only after
+`/reload-plugins`. Stopping at step two leaves you with every file present and nothing enforcing,
+which looks exactly like a kit that does not work.
+
+A full session restart is **not** needed.
 
 **The advice, stated plainly: fork this and run your own marketplace.** Installing from someone
 else's repository means a hook on your machine changes when they push. There is no signing, no

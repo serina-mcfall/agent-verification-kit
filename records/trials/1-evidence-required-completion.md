@@ -486,6 +486,39 @@ of those happens, the comments in both files claim a property the harness does n
 
 ---
 
+## Addendum 4 — `true_positives` ruled, 2026-09-04
+
+Serina ruled on the dispute this record has carried since Addendum 1. **`true_positives` counts only
+what the mechanism caught by firing.** The rule is now written into
+[`TEMPLATE.md`](TEMPLATE.md#the-numbers) rather than argued again per stage.
+
+### `true_positives: 1` → `0`
+
+The `1` was the `CHECK_MODELS` portability defect. This record's own words, unchanged since it was
+written: *"found by reading before packaging."* That is review working, not the mechanism working,
+and it is the **same category** as the two findings Stage 2's count was disputed over.
+
+The inconsistency is what forced the ruling. Stage 2's `5` was disputed on the grounds that
+eye-caught findings should not count, while Stage 1's `1` — an eye-caught finding — went undisputed
+in the same programme. The field meant two different things in two adjacent files, which is worse
+than either meaning.
+
+**A `0` here is not a failure and should not be read as one.** Nothing in Stage 1 was ever given to
+this mechanism to catch: it was trialled against controls and a fixture, never run against a real
+attempt to commit without testing. `keep` was earned on delivery evidence and 224 controls, and none
+of that changes.
+
+| Field | Was | Now |
+|---|---|---|
+| `true_positives` | 1, disputed | **0** — ruled, no longer disputed |
+| `false_positives` | 0 | 0 |
+| everything else | | unchanged |
+
+`REV-0005` is superseded by `REV-0007` carrying the corrected figure. The earlier events stay in the
+record; the number moved once, in the open, with the reasoning attached.
+
+---
+
 ## Record it
 
 ```bash
