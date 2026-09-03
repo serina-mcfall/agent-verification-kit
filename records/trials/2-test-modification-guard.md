@@ -14,6 +14,12 @@ would hide that:**
 A single verdict for "the test-modification guard" would have had to pick one of those and
 misreport the other. The template asks for one verdict per *mechanism*; this stage shipped two.
 
+> **The `keep` was awarded prematurely and re-earned.** On 2026-09-03 it was granted while
+> `check-test-changes.sh` still carried a Blocker — `--diff-filter=MD` omitted git type changes, so
+> a test swapped for a symlink read as clean. Closed and covered 2026-09-04. **See Addendum 3**,
+> which also records the other four review findings and the four separate cases of a control that
+> could not fail.
+
 ---
 
 ## What this mechanism is meant to catch
@@ -321,6 +327,95 @@ nobody can navigate to from the PR. It must never be merged.
 | `true_positives` | 3 | **5** (added the stale job-name count; the deprecated checkout) |
 | CI runs observed | 1 | **2** — `controls` on push, both jobs on a pull request |
 | plugin installs observed | 0 | 0 |
+
+---
+
+## Addendum 3 — Serina's review, 2026-09-04
+
+Reviewed by Serina, `review-code` and `review-tests`, split by artefact. **Five findings, two of
+them Blockers. All five verified by reproduction before being accepted, and all five closed
+control-first — the control written and observed RED before any code changed.**
+
+### The `keep` in the header table was premature
+
+It was awarded on the strength of PR #1 failing correctly. At that moment
+`check-test-changes.sh` carried **Blocker 1**: `--diff-filter=MD` omitted git's type-change status,
+so a tracked test file swapped for a symlink was invisible and the script reported clean.
+
+The PR proof was real and remains real. It simply did not test the thing that was broken — every
+fixture and the PR itself *modified* a test, and none changed a file's **type**. A `keep` earned by
+one true positive is not a `keep` earned against the mechanism's failure modes, and this record
+should not have implied otherwise.
+
+The verdict stands as `keep` now, **re-earned 2026-09-04** with the hole closed and covered.
+
+### The five findings
+
+| # | Sev | Finding | Closed by |
+|---|---|---|---|
+| 1 | **Blocker** | `--diff-filter=MD` missed type changes (`T`). `rm x && ln -s /dev/null x` reported clean, exit 0, seen by **neither** half | `MDT`; suite section 11, red first (`exit 0, wanted 1`) |
+| 2 | **Blocker** | `test-verify-gate-portability.sh` passed against the bug it existed to catch | `HOME` isolated + mutation baked into the suite; 6/0 current, 3/2 reverted |
+| 3 | High | `test-guard.sh` read only `.tool_input.file_path`; `NotebookEdit` uses `notebook_path`, so every notebook edit was silently allowed | read both keys; section 10, red first. **Same defect fixed in `edit-tracker.sh` in both the plugin and the live copy** |
+| 4 | Medium | unquoted `set -- $1` glob-expanded, freezing `AVK_TEST_EXTRA` to the files present at that instant | `read -ra`; section 12, red first |
+| 5 | Medium | a path containing a space was permanently undeclarable, including via the printed remedy | prefix matching in **both** matchers; 5 negative controls hold the boundary |
+
+Finding 3 reached beyond the kit. `edit-tracker.sh`'s version does not fail by leaving the stamp
+alone — it clears the **wrong repository's** stamp, fail-open for the repository that was edited
+and fail-closed for the one that was not. Invisible in a single-repo session, because there cwd and
+the edited repository coincide.
+
+### Four separate instances of "I wrote a check and it did not check"
+
+This is the finding that outlives the five above, so it is recorded as a pattern rather than as four
+footnotes:
+
+| Instance | How it failed | How it was caught |
+|---|---|---|
+| `test-verify-gate-portability.sh` | passed against reverted code | mutation, prompted by `review-tests` |
+| The first draft of section 12 | fixture name matched a built-in pattern, so 2 of 4 assertions passed either way | ran it and read the output |
+| Section 8 | patterns were `vendor/*` and `*.feature` in a directory containing neither — the environment did the work | noticed while writing section 12 |
+| The workflow's own staleness guard | `case` against a multi-line list failed for any filename ending a line; reported 3 listed suites as unlisted | ran it before trusting it |
+
+Not one was caught by reading. Every one was caught by **executing the check against something it
+should have rejected.** That is the entire method, and its absence is what produced all four.
+
+### And CI had never run one of the suites
+
+`test-edit-tracker-notebook.sh` was written, committed, and left out of the workflow's explicit
+list — nine suites running while ten existed. A control that never runs is worth less than no
+control, because its presence is counted as coverage. The list is now guarded: every `test-*.sh`
+must be a listed suite or a named implementation file, and the step fails otherwise.
+
+A bare glob is not the alternative. `test-guard.sh` and `test-patterns.sh` are **implementation**
+files whose names begin with `test-`, so a glob runs them as suites and they exit 0 having asserted
+nothing — and the kit's own classifier calls them `test` while calling their sibling
+`check-test-changes.sh` `other`. **That naming is an open finding**, not closed here: the fix is a
+rename touching `hooks.json`, the workflow, the README and both suites' defaults.
+
+### Revised numbers
+
+| Field | Was | Now |
+|---|---|---|
+| controls, this stage | 138 | **173** (68 + 46 + 54 + 5) |
+| controls, kit-wide | 362 | **400**, ten suites |
+| `ci_seconds` | 17 | 17 |
+| `true_positives` | 5 | **5, disputed** — see below |
+| `false_positives` | 1 | 1 |
+| CI runs observed | 2 | **4** — both jobs on a PR, plus two pushes with the staleness guard |
+| plugin installs observed | 0 | **0** |
+
+**`true_positives: 5` remains disputed and unadjusted.** Two of the five are the stale job-name
+count and the deprecated `checkout@v4`, neither of which the mechanism caught — they were noticed by
+eye while reading CI output. The honest figure is arguably 3. It is left as recorded pending a
+human ruling, because silently editing the number that decides verdicts is worse than leaving a
+flagged dispute in the record.
+
+### Verdict
+
+| Half | Verdict | Change |
+|---|---|---|
+| `check-test-changes.sh` (CI) | **`keep`** | **re-earned 2026-09-04.** Awarded prematurely on 2026-09-03 over a live Blocker |
+| `test-guard.sh` (hook) | **`blocked`** | unchanged. Still zero plugin installs; nothing has fired from `${CLAUDE_PLUGIN_ROOT}` |
 
 ## Record it
 

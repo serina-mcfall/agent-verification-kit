@@ -195,6 +195,63 @@ Step 3 is the one that can produce a false `keep`. With the author's global hook
 session, a commit will be blocked whether the plugin works or not — and reading that block as proof
 of the plugin is precisely the "absent data read as confirmation" error recorded as INC-0006.
 
+---
+
+## Addendum — Serina's review, 2026-09-04
+
+### One of this trial's own controls could not fail
+
+Row 6 of *What was thrown at it* credits `test-verify-gate-portability.sh` with 3 controls and
+says it exists because the `CHECK_MODELS` default "was exercised by nothing". **That control was
+itself exercising nothing.** Confirmed by mutation: the fix was reverted in a copy of the hooks
+directory, this suite was run against it, and it reported **3 passed / 0 failed**.
+
+The cause is specific. On this machine `$HOME/.claude/hooks/check-models.sh` exists and is
+executable — it is the very symlink the plugin was extracted from — so the old expression and the
+new one both resolved to a working checker, both produced the same message, and the assertion held
+either way. The control measured *"some checker was found"*, never *"the sibling was found"*.
+
+**So this trial's headline of "224 controls, 0 failing" was three controls weaker than it read.**
+Not wrong about the other 221, but the one control written specifically to cover a modification was
+the one that could not detect its reversal.
+
+The sharpest part is that this file already recorded the reasoning that should have prevented it —
+*"both outcomes are `exit 2`, so a control asserting on the exit code would have passed whether the
+fix worked or not"* — and the same error was then made one level up: asserting on which **message**
+came out rather than on which **file** produced it. Diagnosing a pattern in a comment is not the
+same as not repeating it.
+
+Closed by isolating `HOME` for every gate invocation, and by baking the mutation into the suite:
+a copy carrying the old default is built at run time, with a working sibling beside it, and asserted
+to report `not-found`. Verified both directions — **6 passed / 0 failed** against current code,
+**3 passed / 2 failed, exit 1** against reverted code.
+
+### A third modification to adopted code
+
+`edit-tracker.sh` now reads `notebook_path` as well as `file_path`. Recorded in the modifications
+list above, with the count corrected from two to three.
+
+### Revised numbers
+
+| Field | Was | Now | Why |
+|---|---|---|---|
+| controls in this trial's own portability suite | 3 | **6** | plus a baked-in mutation |
+| `true_positives` | 1 | **1** | deliberately unchanged — see below |
+| `false_positives` | 0 | 0 | |
+| plugin installs observed | 0 | **0** | unchanged, and still what the verdict turns on |
+
+**`true_positives` is deliberately not incremented.** The vacuous control and the `edit-tracker`
+key were found by review, not caught by the mechanism. That field means "real problems this
+mechanism caught", and padding it with things a reader found by eye corrupts the one number this
+record's own template says decides most verdicts. The same objection applies to Stage 2's count of
+5, and is flagged there for a human ruling rather than silently adjusted.
+
+### Verdict — unchanged
+
+**Still `blocked`.** Nothing here has fired from `${CLAUDE_PLUGIN_ROOT}`; zero plugin installs have
+been observed. The review improved the evidence behind the *scripts* and changed nothing about the
+*delivery*, which is the only thing this verdict was ever about.
+
 ## Record it
 
 ```bash
