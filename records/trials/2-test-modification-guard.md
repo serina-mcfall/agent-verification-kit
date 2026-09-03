@@ -1,6 +1,6 @@
 # Trial — test-modification guard
 
-**Stage** 2 · **Started** 2026-09-03 · **Closed** — open
+**Stage** 2 · **Started** 2026-09-03 · **Closed** 2026-09-04
 **Where** `serina-mcfall/agent-verification-kit`
 
 **Verdict — split, because the two halves have different evidence and one verdict
@@ -9,7 +9,11 @@ would hide that:**
 | Half | Verdict | Why |
 |---|---|---|
 | `check-test-changes.sh` (CI) | **`keep`** | failed a real pull request with exit 1, naming the path — PR #1, run `33734157319` |
-| `test-guard.sh` (hook) | **`blocked`** | no plugin install has been observed; it has never fired from `${CLAUDE_PLUGIN_ROOT}` |
+| `guard-test-changes.sh` (hook) | **`keep`** | fired from `${CLAUDE_PLUGIN_ROOT}` and refused an undeclared test edit, 2026-09-04 — **see Addendum 4** |
+
+> **The hook half was `blocked` until 2026-09-04**, on one number and nothing else: zero plugin
+> installs observed. That number is now 1, and the hook has been observed refusing, printing a
+> remedy, and allowing the retry once the remedy was followed.
 
 A single verdict for "the test-modification guard" would have had to pick one of those and
 misreport the other. The template asks for one verdict per *mechanism*; this stage shipped two.
@@ -429,6 +433,106 @@ flagged dispute in the record.
 | `check-test-changes.sh` (CI) | **`keep`** | **re-earned 2026-09-04.** Awarded prematurely on 2026-09-03 over a live Blocker |
 | `test-guard.sh` (hook) | **`blocked`** | unchanged. Still zero plugin installs; nothing has fired from `${CLAUDE_PLUGIN_ROOT}` |
 
+---
+
+## Addendum 4 — the hook half fired from the plugin, 2026-09-04
+
+Stage 1's Addendum 2 carries the full install sequence and the probe table; this addendum records
+only what is specific to `guard-test-changes.sh`, because the two stages were blocked by the same
+missing observation and it would be dishonest to present one piece of evidence as two.
+
+### What was observed
+
+A fixture repository holding `tests/test_thing.py` (classifies `test`) and `playwright.config.ts`
+(classifies `test-config`), both committed. Classifier verdicts checked **before** any probe, so a
+refusal could not be confused with a misclassification.
+
+| # | Probe | Condition | Result |
+|---|---|---|---|
+| 1 | `Edit` `tests/test_thing.py` | before the marketplace was added | **allowed** |
+| 2 | same edit | plugin installed, **not** reloaded | **allowed** |
+| 3 | same edit | after `/reload-plugins` | **REFUSED** |
+| 4 | same edit | after writing the declaration | **allowed** |
+
+Probe 3's refusal, in full attribution:
+
+```
+PreToolUse:Edit hook error: [bash "${CLAUDE_PLUGIN_ROOT}/hooks/guard-test-changes.sh"]:
+EDIT BLOCKED — tests/test_thing.py is a test file and this change is not declared.
+```
+
+The harness prefixes the failure with the hook's own command string, so the plugin's copy is named
+directly rather than inferred. The fallback discriminator prepared beforehand — that no global hook
+on this machine emits `is a test file` or `is test configuration`, verified by `grep` across all
+nine global hooks, the rules-engine, `pr-gate.sh` and `loom_hook.py`, **no matches** — held, and
+was not needed.
+
+### The printed remedy was executed rather than read
+
+This is the part worth keeping. The refusal prints a copy-pasteable declaration, and Addendum 1
+records why that matters: this kit's ancestor shipped a refusal whose documented escape hatch was
+wrong about the project it was describing, and the wrong route became the trained one.
+
+So probe 4 did not hand-write a declaration. It ran **the exact two commands the refusal printed**,
+unmodified, and retried the identical edit. The edit was allowed. The remedy works, on real output,
+from the plugin's copy — not from a fixture reproducing what the remedy is believed to say.
+
+That is the same method as `test-check-test-changes.sh` section 10, applied to the hook half for
+the first time.
+
+### What this addendum did NOT determine
+
+- **Whether anyone sees the authorisation.** Lines 213–222 of `guard-test-changes.sh` exist to
+  announce *"$CLASS change to $REL is declared — <reason>. Allowed."* at the moment the declaration
+  is relied upon, on the stated reasoning that an authorisation nobody sees is indistinguishable
+  from no gate. **Probe 4 produced no such line to the agent.** Whether it reached the human
+  operator's screen is **unresolved** — asked, unanswered at time of writing. If it reached nobody,
+  the property is undelivered and this half warrants a `fix`, not a `keep`. Flagged here rather
+  than resolved in the mechanism's favour.
+- **`test-config` was never probed.** `playwright.config.ts` sits in the fixture, classifies
+  correctly, and **was never edited**. So the `test-config` branch of the refusal — the branch
+  written for the `retries: 2` flake response this guard exists to slow down — **has still never
+  fired from the plugin.** It is covered by local controls. It is not covered by this observation,
+  and the two should not be conflated.
+- **`MultiEdit` and `NotebookEdit` were not probed.** `hooks.json` matches
+  `Edit|Write|MultiEdit|NotebookEdit`; only `Edit` was exercised. Finding 3 of Addendum 3 was
+  precisely a `notebook_path` defect, so the untested matcher is the one with a defect history.
+- **Deletion, `rm`, other harnesses, IDEs, humans.** Unchanged and unchangeable — the stated blind
+  spot the CI half exists to cover.
+- **Whether the declaration friction is tolerable.** Still author-tested only. One declaration was
+  written, by the person who designed the format.
+
+### Revised numbers
+
+| Field | Was | Now | Why |
+|---|---|---|---|
+| **plugin installs observed** | **0** | **1** | |
+| hook refusals observed from `${CLAUDE_PLUGIN_ROOT}` | 0 | **1** | probe 3 |
+| declaration path exercised end to end | 0 | **1** | probe 4, using the printed remedy verbatim |
+| `test-config` refusals observed from the plugin | 0 | **0** | the fixture supports it; it was not run |
+| `ci_seconds` | 17 | 17 | unchanged |
+| `true_positives` | 5, disputed | **5, still disputed** | see below |
+| `false_positives` | 1 | 1 | |
+| controls, kit-wide | 400 | 400 | no control added or run here |
+
+**`true_positives: 5` is unchanged and still disputed, for the third record in a row.** Two of the
+five — the stale job-name count and the deprecated `checkout@v4` — were noticed by eye while
+reading CI output, not caught by the mechanism. The honest figure is arguably 3. Nothing in this
+addendum changes the argument either way, and it is **not** being quietly adjusted while a verdict
+is being raised in the same edit; that is exactly when a number is easiest to move unnoticed. It
+remains a human ruling.
+
+### Verdict
+
+| Half | Verdict | Change |
+|---|---|---|
+| `check-test-changes.sh` (CI) | **`keep`** | unchanged; re-earned 2026-09-04 in Addendum 3 |
+| `guard-test-changes.sh` (hook) | **`keep`** | **`blocked` → `keep` 2026-09-04.** Fired from `${CLAUDE_PLUGIN_ROOT}`, refused an undeclared `test` edit, and allowed the retry after its own printed remedy was run |
+
+Both halves now hold `keep`, and **Stage 3 (`flake-triage`) is unblocked.**
+
+---
+
 ## Record it
 
 ```bash
@@ -450,4 +554,28 @@ flagged dispute in the record.
   --summary "a weakened suite still goes green: CI passed on a branch whose tests cannot fail" \
   --tags ci/flaky-tests,process/verification \
   --doc records/trials/2-test-modification-guard.md
+```
+
+The hook half's `blocked` above is superseded 2026-09-04. Left in place rather than edited, for the
+same reason the rest of this file keeps its history: `query.sh --open` can only close an incident
+via a superseding event, so an edited line would vanish from the record and an overwritten verdict
+would look like it was never in doubt.
+
+```bash
+<skill>/record.sh --kind review \
+  --summary "guard-test-changes hook: keep — refused an undeclared test edit from CLAUDE_PLUGIN_ROOT, and its printed remedy cleared it" \
+  --tags ci/hooks,process/verification \
+  --field verdict=keep --field mechanism=test-guard-hook \
+  --field ci_seconds=0 --field false_positives=0 --field true_positives=0 \
+  --doc records/trials/2-test-modification-guard.md
+
+<skill>/record.sh --kind note \
+  --summary "adding a marketplace is not installing a plugin: all 19 hook files were on disk and none was wired" \
+  --tags ci/hooks,process/verification \
+  --doc records/trials/1-evidence-required-completion.md
+
+<skill>/record.sh --kind note \
+  --summary "plugin hooks load on /reload-plugins, not at install and not only at session start" \
+  --tags ci/hooks,process/verification \
+  --doc records/trials/1-evidence-required-completion.md
 ```
