@@ -137,11 +137,42 @@ avk_glob_matches() {
     esac
 }
 
+# Splits a colon-separated list into one item per line.
+#
+# THIS USED `set -- $1` AND THAT WAS A FAIL-OPEN. Found 2026-09-04 by an
+# adversarial review of the code.
+#
+# An unquoted `$1` gets the intended IFS=':' field split AND pathname expansion
+# against whatever directory the process happens to be in. So a glob pattern was
+# silently replaced by the files matching it at that instant:
+#
+#   cwd contains checks/a_test.py
+#   AVK_TEST_EXTRA="checks/*"  ->  checks/a_test.py    (frozen to one file)
+#
+# Every test added under checks/ afterwards then classified as `other`, so its
+# later modification was neither blocked by test-guard.sh nor flagged by
+# check-test-changes.sh — a fail-open in precisely the direction the variable
+# exists to widen. AVK_TEST_IGNORE broke the opposite way, over-blocking.
+#
+# The classifier's job is to read STRINGS. It had no business reading the
+# filesystem, and the bug is that one character of quoting let it.
+#
+# `read -ra` splits on IFS and performs no pathname expansion, so it cannot happen
+# again. `set -f`/`set +f` around the old form would also work and was rejected:
+# it mutates shell options in a SOURCED library, and restoring them correctly
+# depends on inspecting `$-` first — more moving parts than the problem deserves.
+#
+# KNOWN LIMIT, stated rather than discovered later: `read` consumes one line, so a
+# value containing a literal newline is truncated at it. Colon-separated pattern
+# lists do not contain newlines, and the per-repo `.claude/test-guard.conf` is the
+# supported route for anything more elaborate.
+#
+# Covered by section 12 of test-test-patterns.sh, confirmed red first.
 _avk_split_colons() {
-    local IFS=':'
-    # shellcheck disable=SC2086
-    set -- $1
-    printf '%s\n' "$@"
+    local IFS=':' arr=()
+    read -ra arr <<< "$1"
+    [ "${#arr[@]}" -gt 0 ] && printf '%s\n' "${arr[@]}"
+    return 0
 }
 
 # Reads <repo>/.claude/test-guard.conf if present. Lines are `<class> <glob>`,

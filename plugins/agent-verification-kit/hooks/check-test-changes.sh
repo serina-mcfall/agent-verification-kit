@@ -116,17 +116,31 @@ TRAILERS=$(git log --format='%(trailers:key=Test-change,valueonly)' "$MERGE_BASE
     || die "'git log' failed reading Test-change trailers over $MERGE_BASE..HEAD."
 
 declared_reason() {
-    local target="$1" line field
+    local target="$1" line reason
     while IFS= read -r line || [ -n "$line" ]; do
         [ -n "$line" ] || continue
-        # Exact match on the first field, for the reason given in test-guard.sh:
-        # a path appearing inside someone else's REASON text must not authorise it.
-        field=${line%%[[:space:]]*}
-        if [ "$field" = "$target" ]; then
-            local reason=${line#"$field"}
-            printf '%s' "${reason#"${reason%%[![:space:]]*}"}"
-            return 0
-        fi
+        # PREFIX MATCH: the trailer value either IS the path, or is the path
+        # followed by whitespace. Both patterns QUOTED, so the path is literal and
+        # a `*` or `[` in it cannot become a glob.
+        #
+        # This was `${line%%[[:space:]]*}` — the first whitespace-delimited field —
+        # which made any path containing a space PERMANENTLY UNDECLARABLE:
+        # `my tests/test_s.py` extracted `my`, and no trailer could satisfy it.
+        # Fail-closed, with the printed remedy reproducing the same unusable line.
+        # Same defect as test-guard.sh's declaration matcher; fixed the same way,
+        # in both places, because a fix applied to one file and not its twin is the
+        # pattern this kit's own hooks record having been bitten by.
+        #
+        # Requiring whitespace after the path is what keeps this from being a
+        # substring match, and a path inside someone else's REASON text still
+        # authorises nothing, because the line must START with the path.
+        case "$line" in
+            "$target"|"$target"[[:space:]]*)
+                reason=${line#"$target"}
+                printf '%s' "${reason#"${reason%%[![:space:]]*}"}"
+                return 0
+                ;;
+        esac
     done <<< "$TRAILERS"
     return 1
 }

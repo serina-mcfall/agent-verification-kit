@@ -231,5 +231,49 @@ check_rc "a NotebookEdit with no path at all does not block" 0
 check_says "and says it is not enforcing on that call" "NOT enforcing"
 echo
 
+echo "11. A PATH CONTAINING A SPACE must be declarable:"
+#
+# WHY THIS CONTROL EXISTS. The declaration matcher took "the path" to be
+# `${line%%[[:space:]]*}` — everything up to the first whitespace — and compared it
+# for equality with the full relative path. For `my tests/test_a.py` that extracted
+# `my`, which never equals the target, so there was NO WAY to declare such a path.
+# The remedy the hook printed reproduced the same un-matchable line, so following
+# the tool's own instructions could never clear the block.
+#
+# This one fails CLOSED — a permanent lockout on a legitimate change rather than a
+# silent pass — which makes it less dangerous than the other findings and more
+# annoying, and annoying is what gets a guard switched off. Every control above
+# used space-free paths, so nothing caught it.
+#
+# The fix is prefix matching: a line declares a path if it IS that path, or is that
+# path followed by whitespace. That handles spaces without quoting rules, and the
+# negative controls below are what stop it becoming a substring match.
+mkdir -p "$REPO/my tests"
+echo "def test_s(): assert 1" > "$REPO/my tests/test_a.py"
+echo "def test_sx(): assert 1" > "$REPO/my tests/test_a.pyx"
+
+decl 'my tests/test_a.py  the fixture path has a space in it'
+run Edit "$REPO/my tests/test_a.py"
+check_rc "a spaced path can be declared and is allowed" 0
+check_says "and the reason is reported" "space in it"
+
+nodecl
+run Edit "$REPO/my tests/test_a.py"
+check_rc "the same spaced path, undeclared, is still blocked" 2
+
+# NEGATIVE CONTROLS — prefix matching must not become substring matching.
+decl 'my tests/test_a.pyx  a different, longer path'
+run Edit "$REPO/my tests/test_a.py"
+check_rc "a LONGER path declared does not authorise the shorter one" 2
+
+decl 'my  a first field that is a prefix of the real path'
+run Edit "$REPO/my tests/test_a.py"
+check_rc "declaring just the first word does not authorise the whole path" 2
+
+decl 'my tests/  the directory, not the file'
+run Edit "$REPO/my tests/test_a.py"
+check_rc "declaring the directory prefix does not authorise the file" 2
+echo
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -207,7 +207,7 @@ git commit -s --trailer "Test-change: tests/test_auth.py the assertion asserted 
 ```
 
 This repository runs it on itself — see [`.github/workflows/test-guard.yml`](.github/workflows/test-guard.yml),
-which also runs all 362 controls on every push.
+which also runs all 400 controls on every push.
 
 `fetch-depth: 0` is not optional. On a shallow clone the base ref does not resolve, and the script
 **exits 3** rather than reporting a clean run — every failure mode of a diff-based checker produces
@@ -265,19 +265,27 @@ Every script ships with its own controls, in the same directory.
 
 ```bash
 cd plugins/agent-verification-kit/hooks
-bash test-stamp-path.sh              #  25 controls
-bash test-verify-gate.sh             #  20
-bash test-verify-gate-portability.sh #   3
-bash test-post-bash.sh               # 148
-bash test-edit-tracker.sh            #  12
-bash test-check-models.sh            #  16
-bash test-test-patterns.sh           #  64
-bash test-test-guard.sh              #  32
-bash test-check-test-changes.sh      #  42
+bash test-stamp-path.sh                #  25 controls
+bash test-verify-gate.sh               #  20
+bash test-verify-gate-portability.sh   #   6
+bash test-post-bash.sh                 # 148
+bash test-edit-tracker.sh              #  12
+bash test-edit-tracker-notebook.sh     #   5
+bash test-check-models.sh              #  16
+bash test-test-patterns.sh             #  68
+bash test-test-guard.sh                #  46
+bash test-check-test-changes.sh        #  54
 ```
 
-**362 controls**, and they run on every push — see the badge-less truth in
-[Actions](https://github.com/serina-mcfall/agent-verification-kit/actions). Every suite opens with a vacuity guard — a control asserting that ordinary,
+**400 controls**, and they run on every push — see the badge-less truth in
+[Actions](https://github.com/serina-mcfall/agent-verification-kit/actions).
+
+**Do not run these with a bare `test-*.sh` glob.** `test-guard.sh` and
+`test-patterns.sh` are *implementation* files whose names begin with `test-`; a glob runs them as
+suites, they read empty stdin, exit 0, and report as passing having asserted nothing. The workflow
+keeps an explicit list and fails if any `test-*.sh` file is neither a listed suite nor one of those
+two named implementation files — because an explicit list goes stale, and this one already had:
+`test-edit-tracker-notebook.sh` was written, committed, and left out of CI for a commit. Every suite opens with a vacuity guard — a control asserting that ordinary,
 innocent input is *not* flagged — because a classifier that says "test" to everything and a guard
 that blocks everything would both pass a coverage count and be useless.
 

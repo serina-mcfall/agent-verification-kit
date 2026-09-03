@@ -177,14 +177,34 @@ if [ -f "$DECL" ]; then
     if [ "$AGE" -gt 1800 ]; then
         echo "test-guard: $DECL is $(( AGE / 60 ))m old (stale after 30m) — treating it as absent." >&2
     else
-        # Exact match on the first whitespace-delimited field. `grep -F -x` on the
-        # whole line would fail the moment a reason was appended, and matching the
-        # path anywhere in the line would let a path inside someone's REASON text
-        # authorise an edit it never named.
+        # PREFIX MATCH: the line either IS the path, or is the path followed by
+        # whitespace. Both patterns are QUOTED, so the path is matched literally —
+        # a path containing `*` or `[` cannot become a glob.
+        #
+        # This was `${line%%[[:space:]]*}`, the first whitespace-delimited field,
+        # and that made any path containing a space PERMANENTLY UNDECLARABLE.
+        # `my tests/test_a.py` extracted `my`, which never equals the target, so
+        # there was no line anyone could write to authorise it — and the remedy
+        # printed below reproduced the same un-matchable line, so following the
+        # tool's own instructions could never clear the block. Found 2026-09-04 by
+        # an adversarial review; every control until then used space-free paths.
+        #
+        # Fail-closed, so less dangerous than the other findings of that review and
+        # more annoying — and annoying is what gets a guard switched off.
+        #
+        # Requiring whitespace after the path is what stops this becoming a
+        # substring match: `my tests/test_a.pyx  reason` must not authorise
+        # `my tests/test_a.py`, and `my  reason` must not authorise either. Both
+        # are asserted as negative controls.
+        #
+        # Matching the path ANYWHERE in the line remains wrong for the original
+        # reason: a path sitting inside someone else's REASON text would authorise
+        # an edit it never named.
         while IFS= read -r line || [ -n "$line" ]; do
             case "$line" in ''|\#*) continue ;; esac
-            field=${line%%[[:space:]]*}
-            if [ "$field" = "$REL" ]; then DECL_LINE="$line"; break; fi
+            case "$line" in
+                "$REL"|"$REL"[[:space:]]*) DECL_LINE="$line"; break ;;
+            esac
         done < "$DECL"
     fi
 fi

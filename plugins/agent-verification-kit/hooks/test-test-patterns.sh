@@ -204,5 +204,58 @@ AVK_TEST_IGNORE='docs/*' want other docs/spec/api.md
 unset AVK_TEST_IGNORE
 echo
 
+echo "12. env-var patterns must survive the CURRENT DIRECTORY:"
+#
+# WHY THIS CONTROL EXISTS. `_avk_split_colons` used `set -- $1` with `$1` unquoted.
+# That is the intended IFS=':' field split, but it ALSO performs pathname
+# expansion against whatever directory the process happens to be in. So a slash
+# pattern was silently replaced by the files that matched it at that instant:
+#
+#   cwd contains checks/a_test.py
+#   AVK_TEST_EXTRA="checks/*"  ->  checks/a_test.py     (frozen, one file)
+#
+# Any test added under checks/ afterwards then classified as `other`, so its later
+# modification was neither blocked by test-guard.sh nor flagged by
+# check-test-changes.sh. A fail-open in exactly the direction the variable exists
+# to widen.
+#
+# Section 8 above passes against the bug: its patterns are `vendor/*`, `*.feature`
+# and so on, and this suite runs from a directory with no `vendor/` and no
+# `.feature` files, so nothing matched and the patterns survived by accident. That
+# is what makes this a coverage gap rather than a wrong assertion — the controls
+# were correct and the environment was doing the work.
+#
+# Found by an adversarial review of the code, not by this suite.
+box2=$(mktemp -d)
+mkdir -p "$box2/checks" "$box2/vendor"
+touch "$box2/checks/existing_test.py" "$box2/vendor/dep_test.py"
+here=$(pwd)
+cd "$box2" || { echo "FAIL  could not enter the fixture dir"; fail=$((fail + 1)); }
+
+# THE FIXTURE NAMES MUST NOT MATCH A DEFAULT PATTERN, or the control is
+# confounded and cannot fail. The first draft of this section used
+# `checks/added_later_test.py`, which matches the built-in `*_test.py` and so
+# classified as `test` whether the env var survived or not — two of four controls
+# passed against the bug. `widget.py` and `.conf` match nothing built in, so the
+# env var is the only thing that can produce the expected answer.
+#
+# Worth keeping as a note in itself: a control can be correct in intent and still
+# assert nothing, because a DIFFERENT rule happens to give the right answer.
+AVK_TEST_EXTRA='checks/*'        want test        checks/widget.py
+AVK_TEST_CONFIG_EXTRA='checks/*' want test-config checks/added_later.conf
+# Same bug in the other direction: an ignore pattern that stops ignoring.
+AVK_TEST_IGNORE='vendor/*'       want other       vendor/added_later_test.py
+unset AVK_TEST_EXTRA AVK_TEST_CONFIG_EXTRA AVK_TEST_IGNORE
+
+# Vacuity guard: the same pattern from a directory where nothing matches it must
+# give the same answer. If this ever diverges from the three above, the classifier
+# is reading the filesystem when it should only be reading strings.
+cd "$box2/vendor" || true
+AVK_TEST_EXTRA='checks/*' want test checks/widget.py
+unset AVK_TEST_EXTRA
+cd "$here" || true
+rm -rf "$box2"
+echo
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

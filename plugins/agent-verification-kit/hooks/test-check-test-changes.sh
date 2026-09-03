@@ -22,10 +22,14 @@ GIT() { git -C "$REPO" -c user.name=T -c user.email=t@example.invalid "$@"; }
 # then a working branch off it. Every control starts from this shape.
 fresh_repo() {
     REPO="$box/r$RANDOM$RANDOM"
-    mkdir -p "$REPO/tests" "$REPO/src"
+    mkdir -p "$REPO/tests" "$REPO/src" "$REPO/my tests"
     git -C "$REPO" init -q -b base
     echo "def test_a(): assert 1" > "$REPO/tests/test_a.py"
     echo "def test_b(): assert 1" > "$REPO/tests/test_b.py"
+    # A tracked test under a directory whose name contains a space. Present in
+    # every fixture so section 12 can MODIFY it rather than add it — an addition
+    # is not gated, so it could not exercise the declaration path at all.
+    echo "def test_s(): assert 1" > "$REPO/my tests/test_s.py"
     echo "print(1)"               > "$REPO/src/main.py"
     echo "export default {}"      > "$REPO/playwright.config.ts"
     GIT add -A >/dev/null
@@ -304,6 +308,60 @@ GIT add -A >/dev/null
 GIT commit -qm "swap it" --trailer "Test-change: tests/test_a.py replaced by a generated fixture symlink"
 run
 check_rc "the same swap, declared, passes" 0
+echo
+
+echo "12. A PATH CONTAINING A SPACE must be declarable here too:"
+#
+# Same defect as section 11 of test-test-guard.sh, in the trailer matcher rather
+# than the declaration matcher: "the path" was `${line%%[[:space:]]*}`, so
+# `my tests/test_s.py` extracted `my` and no trailer could ever satisfy it.
+# Fail-closed — a legitimate change with no route to green, and the remedy the
+# script prints reproduced the same un-matchable line.
+#
+# Every fixture above used space-free paths, which is why 46 controls passed over
+# it.
+fresh_repo
+echo "def test_s(): pass" > "$REPO/my tests/test_s.py"
+GIT commit -qam "weaken the spaced-path test"
+run
+check_rc "undeclared, as set up" 1
+check_says "the spaced path is named" "my tests/test_s.py"
+
+fresh_repo
+echo "def test_s(): pass" > "$REPO/my tests/test_s.py"
+GIT commit -qam "x" --trailer "Test-change: my tests/test_s.py the fixture path has a space"
+run
+check_rc "a trailer naming the spaced path allows it" 0
+check_says "and the reason is reported back" "has a space"
+
+# NEGATIVE — prefix matching must not degrade into substring matching.
+fresh_repo
+echo "def test_s(): pass" > "$REPO/my tests/test_s.py"
+GIT commit -qam "x" --trailer "Test-change: my a first field that is a prefix"
+run
+check_rc "declaring just the first word does not authorise the whole path" 1
+
+fresh_repo
+echo "def test_s(): pass" > "$REPO/my tests/test_s.py"
+GIT commit -qam "x" --trailer "Test-change: my tests/ the directory, not the file"
+run
+check_rc "declaring the directory prefix does not authorise the file" 1
+
+# AND THE PRINTED REMEDY MUST WORK FOR IT — the section 10 discipline, applied to
+# the case where the printed line is most likely to be wrong.
+fresh_repo
+echo "def test_s(): pass" > "$REPO/my tests/test_s.py"
+GIT commit -qam "weaken it"
+run
+suggested=$(printf '%s\n' "$OUT" | sed -n 's/.*--trailer "Test-change: \(.*\) <reason>".*/\1/p' | head -1)
+if [ "$suggested" = "my tests/test_s.py" ]; then
+    echo "ok    the printed remedy names the spaced path in full: [$suggested]"; pass=$((pass + 1))
+else
+    echo "FAIL  the printed remedy mangled the spaced path: [$suggested]"; fail=$((fail + 1))
+fi
+GIT commit -q --amend --no-edit --trailer "Test-change: $suggested a reason"
+run
+check_rc "running exactly what it printed clears the check" 0
 echo
 
 echo "$pass passed, $fail failed"
