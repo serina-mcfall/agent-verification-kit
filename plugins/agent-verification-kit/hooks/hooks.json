@@ -1,0 +1,36 @@
+{
+  "description": "Evidence-required completion. post-bash writes a verification stamp when a test or build command passes; edit-tracker clears it when a file changes; verify-gate refuses a commit without a fresh one. All three resolve the stamp through stamp-path.sh, which decides WHICH repository's stamp is at stake.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/verify-gate.sh\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-bash.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/edit-tracker.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

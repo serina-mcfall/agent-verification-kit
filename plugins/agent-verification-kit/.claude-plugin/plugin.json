@@ -1,0 +1,9 @@
+{
+  "name": "agent-verification-kit",
+  "version": "0.1.0",
+  "description": "Evidence-required completion for agentic coding, enforced by hooks rather than by instructions. Blocks a commit unless a fresh verification stamp exists; the stamp is earned only by a passing test or build command, scoped to the repository being committed to, expiring after 30 minutes, and cleared by any file edit. Also refuses a commit whose agent definitions name a model that does not resolve. Governs this harness only — see README for what that does and does not cover.",
+  "author": {
+    "name": "Serina Mcfall",
+    "email": "serina-mcfall@users.noreply.github.com"
+  }
+}
