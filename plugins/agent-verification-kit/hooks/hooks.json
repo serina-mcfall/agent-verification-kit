@@ -1,5 +1,5 @@
 {
-  "description": "Evidence-required completion plus a test-modification guard. post-bash writes a verification stamp when a test or build command passes; edit-tracker clears it when a file changes; verify-gate refuses a commit without a fresh one; test-guard refuses to modify an existing test or test config without a declaration naming it. The stamp trio resolves through stamp-path.sh; the guard classifies paths through test-patterns.sh. check-test-changes.sh is the CI half of the guard and is invoked by your workflow, not by a hook.",
+  "description": "Evidence-required completion plus a test-modification guard. post-bash writes a verification stamp when a test or build command passes; edit-tracker clears it when a file changes; verify-gate refuses a commit without a fresh one; guard-test-changes refuses to modify an existing test or test config without a declaration naming it. The stamp trio resolves through stamp-path.sh; the guard classifies paths through classify-test-paths.sh. check-test-changes.sh is the CI half of the guard and is invoked by your workflow, not by a hook. Naming convention: implementation files are named for what they do; every file named test-* is a control suite and nothing else.",
   "hooks": {
     "PreToolUse": [
       {
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/test-guard.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/guard-test-changes.sh\""
           }
         ]
       }

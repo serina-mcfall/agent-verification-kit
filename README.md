@@ -59,7 +59,7 @@ not that touching is impossible.
 
 ### The test-modification guard makes weakening deliberate, not impossible
 
-`test-guard.sh` checks a file — `.claude/.test-change` — that the agent it constrains can write.
+`guard-test-changes.sh` checks a file — `.claude/.test-change` — that the agent it constrains can write.
 So it is **not** an integrity control against an agent that has decided to weaken a test. It cannot
 be; anything a hook reads from the working tree, the thing being hooked can also write.
 
@@ -153,7 +153,7 @@ Two halves, deliberately. Neither is sufficient and each covers the other's blin
 
 ```mermaid
 flowchart TD
-    A["Agent edits a test file"] -->|"PreToolUse: Edit|Write"| G["test-guard.sh<br/>declared in .claude/.test-change?"]
+    A["Agent edits a test file"] -->|"PreToolUse: Edit|Write"| G["guard-test-changes.sh<br/>declared in .claude/.test-change?"]
     G -->|"yes"| OK1["allowed, and it says<br/>what authorised it"]
     G -->|"no"| NO1["EDIT BLOCKED<br/>names the path + the line to write"]
 
@@ -168,7 +168,7 @@ flowchart TD
     style R fill:#f6efe0,stroke:#8a6d3a
 ```
 
-| | `test-guard.sh` (hook) | `check-test-changes.sh` (CI) |
+| | `guard-test-changes.sh` (hook) | `check-test-changes.sh` (CI) |
 |---|---|---|
 | Sees | Claude Code `Edit`/`Write` calls | any change, however it was made |
 | Misses | `rm`, other harnesses, IDEs, humans | nothing in the diff |
@@ -206,7 +206,7 @@ git commit -s --trailer "Test-change: tests/test_auth.py the assertion asserted 
 - run: bash plugins/agent-verification-kit/hooks/check-test-changes.sh origin/main
 ```
 
-This repository runs it on itself — see [`.github/workflows/test-guard.yml`](.github/workflows/test-guard.yml),
+This repository runs it on itself — see [`.github/workflows/verification.yml`](.github/workflows/verification.yml),
 which also runs all 400 controls on every push.
 
 `fetch-depth: 0` is not optional. On a shallow clone the base ref does not resolve, and the script
@@ -272,20 +272,40 @@ bash test-post-bash.sh                 # 148
 bash test-edit-tracker.sh              #  12
 bash test-edit-tracker-notebook.sh     #   5
 bash test-check-models.sh              #  16
-bash test-test-patterns.sh             #  68
-bash test-test-guard.sh                #  46
+bash test-classify-test-paths.sh             #  68
+bash test-guard-test-changes.sh                #  46
 bash test-check-test-changes.sh        #  54
 ```
 
 **400 controls**, and they run on every push — see the badge-less truth in
 [Actions](https://github.com/serina-mcfall/agent-verification-kit/actions).
 
-**Do not run these with a bare `test-*.sh` glob.** `test-guard.sh` and
-`test-patterns.sh` are *implementation* files whose names begin with `test-`; a glob runs them as
-suites, they read empty stdin, exit 0, and report as passing having asserted nothing. The workflow
-keeps an explicit list and fails if any `test-*.sh` file is neither a listed suite nor one of those
-two named implementation files — because an explicit list goes stale, and this one already had:
-`test-edit-tracker-notebook.sh` was written, committed, and left out of CI for a commit. Every suite opens with a vacuity guard — a control asserting that ordinary,
+### Naming, and why it is load-bearing
+
+**Every file named `test-*` is a control suite. Nothing else is.** Implementations are named for
+what they do:
+
+| Implementation | Its suite |
+|---|---|
+| `guard-test-changes.sh` | `test-guard-test-changes.sh` |
+| `check-test-changes.sh` | `test-check-test-changes.sh` |
+| `classify-test-paths.sh` | `test-classify-test-paths.sh` |
+| `verify-gate.sh` | `test-verify-gate.sh` |
+
+That invariant was **not** true until 2026-09-04. The hook and the classifier were called
+`test-guard.sh` and `test-patterns.sh`, which meant a `test-*.sh` glob ran them as suites — they
+read empty stdin, exited 0, and reported as passing having asserted nothing — and the kit's own
+classifier called them `test` while calling their sibling `check-test-changes.sh` `other`. Their
+suites had to be named `test-test-guard.sh` and `test-test-patterns.sh`, and that doubled prefix
+was the tell.
+
+`guard-test-changes.sh` now also pairs with `check-test-changes.sh` by name, which is what the two
+halves of the guard actually are: one guards before the write, the other checks after the commit.
+
+The workflow keeps an **explicit** list of suites and fails if any `test-*.sh` file is missing from
+it, or listed but absent. Explicit rather than a glob because a glob cannot tell you a suite has
+gone *missing* — and this list had already gone stale once: `test-edit-tracker-notebook.sh` was
+written, committed, and left out of CI for a commit. Every suite opens with a vacuity guard — a control asserting that ordinary,
 innocent input is *not* flagged — because a classifier that says "test" to everything and a guard
 that blocks everything would both pass a coverage count and be useless.
 

@@ -6,9 +6,9 @@
 #   bash check-test-changes.sh [BASE_REF]      default: origin/main
 #
 # ---------------------------------------------------------------------------
-# WHY THIS EXISTS ALONGSIDE test-guard.sh
+# WHY THIS EXISTS ALONGSIDE guard-test-changes.sh
 #
-# test-guard.sh is a Claude Code hook. It sees Claude Code's Edit and Write calls
+# guard-test-changes.sh is a Claude Code hook. It sees Claude Code's Edit and Write calls
 # and nothing else — not Codex, not an IDE, not a human, and not `rm`. It also
 # checks a file the agent it constrains can write.
 #
@@ -42,7 +42,7 @@
 set -u
 
 BASE="${1:-${AVK_BASE_REF:-origin/main}}"
-PATTERNS_LIB="${PATTERNS_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/test-patterns.sh}"
+PATTERNS_LIB="${PATTERNS_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/classify-test-paths.sh}"
 
 die() { printf 'check-test-changes: CANNOT DETERMINE — %s\n' "$1" >&2; exit 3; }
 
@@ -64,7 +64,7 @@ MERGE_BASE=$(git merge-base "$BASE" HEAD 2>/dev/null) \
 # `--diff-filter=MD --no-renames`, and every part of that is load-bearing.
 #
 # ADDED FILES ARE EXCLUDED (no `A`) BECAUSE THE TWO HALVES MUST AGREE.
-# test-guard.sh never blocks creating a test — taxing new tests would train agents
+# guard-test-changes.sh never blocks creating a test — taxing new tests would train agents
 # to avoid writing them, which is worse than anything this guard prevents. An
 # earlier draft of this script used a bare `--name-only`, which includes additions,
 # so the CI half would have demanded a trailer for every new test file the hook had
@@ -77,7 +77,7 @@ MERGE_BASE=$(git merge-base "$BASE" HEAD 2>/dev/null) \
 #
 # `D` IS THE WHOLE POINT. A deleted test is the most direct form of the behaviour
 # this exists to catch; EvilGenie (Nov 2025) caught agents deleting test files
-# outright, and deletion is also the bypass test-guard.sh cannot see, because `rm`
+# outright, and deletion is also the bypass guard-test-changes.sh cannot see, because `rm`
 # arrives as a Bash call rather than an Edit.
 #
 # `--no-renames` CLOSES THE GAP THAT OPENS WHEN ADDITIONS ARE FREE. With rename
@@ -99,7 +99,7 @@ MERGE_BASE=$(git merge-base "$BASE" HEAD 2>/dev/null) \
 #
 # This script then printed "0 to declare" and exited 0. The content a runner would
 # read had been replaced wholesale, with no declaration and a clean CI result — and
-# test-guard.sh cannot see it either, because the swap arrives as Bash rather than
+# guard-test-changes.sh cannot see it either, because the swap arrives as Bash rather than
 # as an Edit. NEITHER HALF SAW IT, which is a direct contradiction of the claim at
 # the top of this file that a diff shows a test changed however it changed.
 #
@@ -127,7 +127,7 @@ declared_reason() {
         # which made any path containing a space PERMANENTLY UNDECLARABLE:
         # `my tests/test_s.py` extracted `my`, and no trailer could satisfy it.
         # Fail-closed, with the printed remedy reproducing the same unusable line.
-        # Same defect as test-guard.sh's declaration matcher; fixed the same way,
+        # Same defect as guard-test-changes.sh's declaration matcher; fixed the same way,
         # in both places, because a fix applied to one file and not its twin is the
         # pattern this kit's own hooks record having been bitten by.
         #

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Sourced library. Classifies a repository path as a test, as test configuration,
-# or as neither. NOT a hook — test-guard.sh and check-test-changes.sh both source
+# or as neither. NOT a hook — guard-test-changes.sh and check-test-changes.sh both source
 # it, for the same reason stamp-path.sh exists: two copies of a classifier is how
 # one gets fixed and the other does not.
 #
@@ -150,7 +150,7 @@ avk_glob_matches() {
 #   AVK_TEST_EXTRA="checks/*"  ->  checks/a_test.py    (frozen to one file)
 #
 # Every test added under checks/ afterwards then classified as `other`, so its
-# later modification was neither blocked by test-guard.sh nor flagged by
+# later modification was neither blocked by guard-test-changes.sh nor flagged by
 # check-test-changes.sh — a fail-open in precisely the direction the variable
 # exists to widen. AVK_TEST_IGNORE broke the opposite way, over-blocking.
 #
@@ -167,7 +167,7 @@ avk_glob_matches() {
 # lists do not contain newlines, and the per-repo `.claude/test-guard.conf` is the
 # supported route for anything more elaborate.
 #
-# Covered by section 12 of test-test-patterns.sh, confirmed red first.
+# Covered by section 12 of test-classify-test-paths.sh, confirmed red first.
 _avk_split_colons() {
     local IFS=':' arr=()
     read -ra arr <<< "$1"

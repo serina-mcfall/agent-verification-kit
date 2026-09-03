@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: jq is present
-        # test-guard.sh and the stamp hooks parse their payloads with jq, and both
+        # guard-test-changes.sh and the stamp hooks parse their payloads with jq, and both
         # announce non-enforcement rather than blocking when it is missing. So a
         # runner without jq would run these suites against hooks that are quietly
         # standing aside — green, and measuring nothing.
@@ -38,14 +38,21 @@ jobs:
         # exists and never runs is worth less than no control, because its presence
         # is counted as coverage.
         #
-        # A bare `test-*.sh` glob is not the answer either: test-guard.sh and
-        # test-patterns.sh are IMPLEMENTATION files whose names begin with `test-`,
-        # so a glob runs them as suites and they exit 0 having asserted nothing.
-        # That naming is a defect in its own right and is recorded separately.
+        # AN EARLIER VERSION OF THIS STEP CARRIED AN `impl` ALLOW-LIST, because two
+        # implementation files — the hook and the classifier — were named
+        # `test-guard.sh` and `test-patterns.sh`. A `test-*.sh` glob ran them as
+        # suites, they read empty stdin, exited 0, and reported as passing having
+        # asserted nothing. The kit's own classifier also called them `test` while
+        # calling their sibling `check-test-changes.sh` `other`.
         #
-        # So the list stays explicit and this step fails when reality diverges from
-        # it. Every test-*.sh file must be either a listed suite or a named
-        # implementation file — nothing may be silently neither.
+        # They were renamed to `guard-test-changes.sh` and `classify-test-paths.sh`
+        # 2026-09-04, so the exception is gone and the invariant is now absolute:
+        # EVERY `test-*.sh` FILE IS A CONTROL SUITE. The allow-list was a workaround
+        # for a naming defect, and deleting it is what proves the defect is fixed —
+        # keeping it would have let the next badly-named implementation file hide.
+        #
+        # The list stays explicit rather than becoming a glob, because a glob cannot
+        # tell you a suite is MISSING. Both directions are checked below.
         run: |
           set -euo pipefail
           # A `case` against " $listed " was the first attempt and it was WRONG:
@@ -54,19 +61,18 @@ jobs:
           # listed suites as unlisted. Membership by loop is whitespace-proof.
           listed="test-stamp-path.sh test-verify-gate.sh test-verify-gate-portability.sh
                   test-post-bash.sh test-edit-tracker.sh test-edit-tracker-notebook.sh
-                  test-check-models.sh test-test-patterns.sh test-test-guard.sh
+                  test-check-models.sh test-classify-test-paths.sh test-guard-test-changes.sh
                   test-check-test-changes.sh"
-          impl="test-guard.sh test-patterns.sh"
           in_list() { local n="$1"; shift; local x; for x in "$@"; do [ "$x" = "$n" ] && return 0; done; return 1; }
           status=0
           for f in test-*.sh; do
-            in_list "$f" $listed $impl \
-              || { echo "::error title=unlisted suite::$f is neither a listed suite nor a named implementation file"; status=1; }
+            in_list "$f" $listed \
+              || { echo "::error title=unlisted suite::$f matches test-*.sh but is not a listed suite. Every test-* file must be a control suite; name implementations for what they do."; status=1; }
           done
           for f in $listed; do
             [ -f "$f" ] || { echo "::error title=missing suite::$f is listed but does not exist"; status=1; }
           done
-          [ "$status" = 0 ] && echo "10 suites listed, 2 implementation files named, nothing unaccounted for"
+          [ "$status" = 0 ] && echo "10 suites listed, every test-*.sh accounted for, no implementation-file exceptions"
           exit "$status"
 
       - name: controls
@@ -82,8 +88,8 @@ jobs:
             test-edit-tracker.sh \
             test-edit-tracker-notebook.sh \
             test-check-models.sh \
-            test-test-patterns.sh \
-            test-test-guard.sh \
+            test-classify-test-paths.sh \
+            test-guard-test-changes.sh \
             test-check-test-changes.sh
           do
             echo "::group::$suite"
@@ -98,7 +104,7 @@ jobs:
           # EVERY SUITE RUNS BEFORE ANYTHING FAILS THE JOB. Exiting on the first
           # failure tells you one thing; running them all tells you whether the
           # breakage is local or general, which is the more useful answer when a
-          # shared library like test-patterns.sh regresses.
+          # shared library like classify-test-paths.sh regresses.
           exit "$fail"
 
   # The CI half of the test-modification guard, applied to this repository.

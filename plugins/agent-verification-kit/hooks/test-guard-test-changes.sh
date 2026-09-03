@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Controls for test-guard.sh.
+# Controls for guard-test-changes.sh.
 #
 # Row structure follows this kit's trial template: cases that SHOULD trip it, cases
 # that SHOULD NOT, and cases that try to walk around it on purpose. The last group
@@ -7,7 +7,7 @@
 # not be stopped, and a suite with no bypass attempts has not tested the guard.
 
 HOOKS="${1:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
-GUARD="$HOOKS/test-guard.sh"
+GUARD="$HOOKS/guard-test-changes.sh"
 pass=0; fail=0
 
 if [ ! -r "$GUARD" ]; then

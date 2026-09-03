@@ -118,7 +118,7 @@ fi
 # file.
 # ---------------------------------------------------------------------------
 STAMP_LIB="${STAMP_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/stamp-path.sh}"
-PATTERNS_LIB="${PATTERNS_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/test-patterns.sh}"
+PATTERNS_LIB="${PATTERNS_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/classify-test-paths.sh}"
 
 if [ ! -r "$PATTERNS_LIB" ]; then
     # FAIL CLOSED, but only for a path that already looks like a test on its

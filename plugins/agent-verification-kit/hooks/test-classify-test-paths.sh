@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Controls for test-patterns.sh — the classifier test-guard.sh and
+# Controls for classify-test-paths.sh — the classifier guard-test-changes.sh and
 # check-test-changes.sh both depend on.
 #
 # The classifier is where this mechanism succeeds or fails. A guard cannot protect
@@ -9,7 +9,7 @@
 # names that look like tests and are not. A classifier that says `test` to
 # everything would pass coverage controls and be useless.
 
-LIB="${1:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/test-patterns.sh}"
+LIB="${1:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/classify-test-paths.sh}"
 pass=0; fail=0
 
 if [ ! -r "$LIB" ]; then
@@ -215,7 +215,7 @@ echo "12. env-var patterns must survive the CURRENT DIRECTORY:"
 #   AVK_TEST_EXTRA="checks/*"  ->  checks/a_test.py     (frozen, one file)
 #
 # Any test added under checks/ afterwards then classified as `other`, so its later
-# modification was neither blocked by test-guard.sh nor flagged by
+# modification was neither blocked by guard-test-changes.sh nor flagged by
 # check-test-changes.sh. A fail-open in exactly the direction the variable exists
 # to widen.
 #

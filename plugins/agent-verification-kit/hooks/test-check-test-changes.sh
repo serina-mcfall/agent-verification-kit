@@ -274,7 +274,7 @@ echo "11. A TYPE CHANGE IS A CHANGE — swapping a test file for a symlink:"
 #
 # The content a test runner would read had been replaced wholesale — point the
 # symlink at /dev/null and the suite collects nothing — with no declaration and a
-# clean CI result. test-guard.sh cannot see it either, because the swap arrives as
+# clean CI result. guard-test-changes.sh cannot see it either, because the swap arrives as
 # Bash rather than as an Edit. So NEITHER HALF saw it, which contradicts this
 # file's own stated reason for existing: a diff shows that a test changed however
 # it changed.
@@ -312,7 +312,7 @@ echo
 
 echo "12. A PATH CONTAINING A SPACE must be declarable here too:"
 #
-# Same defect as section 11 of test-test-guard.sh, in the trailer matcher rather
+# Same defect as section 11 of test-guard-test-changes.sh, in the trailer matcher rather
 # than the declaration matcher: "the path" was `${line%%[[:space:]]*}`, so
 # `my tests/test_s.py` extracted `my` and no trailer could ever satisfy it.
 # Fail-closed — a legitimate change with no route to green, and the remedy the

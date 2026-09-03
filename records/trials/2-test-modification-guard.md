@@ -22,6 +22,18 @@ misreport the other. The template asks for one verdict per *mechanism*; this sta
 
 ---
 
+> **Paths in this document are the names they had at the time.** On 2026-09-04 four files were
+> renamed to close INC-0010. The historical names are left in place below rather than rewritten,
+> because rewriting them would falsify what was built and reviewed under which name.
+>
+> | Then | Now |
+> |---|---|
+> | `test-guard.sh` | `guard-test-changes.sh` |
+> | `test-patterns.sh` | `classify-test-paths.sh` |
+> | `test-test-guard.sh` | `test-guard-test-changes.sh` |
+> | `test-test-patterns.sh` | `test-classify-test-paths.sh` |
+> | `.github/workflows/test-guard.yml` | `.github/workflows/verification.yml` |
+
 ## What this mechanism is meant to catch
 
 A test, or test configuration, changed to make a red suite green.
