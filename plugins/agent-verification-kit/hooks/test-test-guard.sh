@@ -175,5 +175,61 @@ check_rc "an ordinary path is NOT refused when the classifier is missing" 0
 check_says "but the non-enforcement is announced" "NOT enforcing"
 echo
 
+echo "10. NotebookEdit — a tool this hook CLAIMS to cover:"
+#
+# WHY THIS CONTROL EXISTS. `hooks.json` matches `Edit|Write|MultiEdit|NotebookEdit`
+# and the `case "$TOOL"` allow-list names all four. But the target was read only
+# from `.tool_input.file_path`, and NotebookEdit does not use that key — its
+# parameter is `notebook_path`. Verified against this harness's own tool schema,
+# not inferred.
+#
+# So every NotebookEdit call produced an empty TARGET, took the "carried no
+# file_path — cannot classify it, so this call is allowed" branch, and exited 0.
+# Every time, for every notebook, regardless of what it was. An entire tool the
+# hook advertises was unguarded, and the message blamed a malformed payload rather
+# than naming the real cause, so it read as ordinary noise instead of a total miss.
+#
+# The controls above could not have caught it: all 32 of them build payloads with
+# `file_path`, because that is the key the implementation reads. A suite written
+# against the implementation tests the implementation's assumptions back to itself.
+nb_payload() {
+    jq -nc --arg p "$1" '{tool_name:"NotebookEdit", tool_input:{notebook_path:$p, new_source:"x"}}'
+}
+nb_run() {
+    OUT=$(nb_payload "$1" | ( cd "$REPO" && CLAUDE_PROJECT_DIR="$REPO" bash "$GUARD" 2>&1 ))
+    RC=$?
+}
+
+mkdir -p "$REPO/tests"
+echo '{"cells":[]}' > "$REPO/tests/test_analysis.ipynb"
+echo '{"cells":[]}' > "$REPO/src/explore.ipynb"
+
+nodecl
+nb_run "$REPO/tests/test_analysis.ipynb"
+check_rc "an undeclared NotebookEdit to an existing test notebook is blocked" 2
+check_says "the refusal names the notebook" "tests/test_analysis.ipynb"
+
+decl 'tests/test_analysis.ipynb  the fixture cell had the wrong expected frame'
+nb_run "$REPO/tests/test_analysis.ipynb"
+check_rc "a declared NotebookEdit is allowed" 0
+check_says "and it reports what authorised it" "wrong expected frame"
+
+# Vacuity: an ordinary notebook must NOT be blocked, or the fix is just a blanket
+# refusal of NotebookEdit rather than a classification.
+nodecl
+nb_run "$REPO/src/explore.ipynb"
+check_rc "a NotebookEdit to a non-test notebook is allowed" 0
+
+# Creation stays free for notebooks too, matching the Edit/Write behaviour.
+nb_run "$REPO/tests/test_brand_new.ipynb"
+check_rc "creating a new test notebook is not blocked" 0
+
+# A payload carrying NEITHER key must still be visible non-enforcement, not a block.
+OUT=$(jq -nc '{tool_name:"NotebookEdit",tool_input:{new_source:"x"}}' \
+    | ( cd "$REPO" && bash "$GUARD" 2>&1 )); RC=$?
+check_rc "a NotebookEdit with no path at all does not block" 0
+check_says "and says it is not enforcing on that call" "NOT enforcing"
+echo
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

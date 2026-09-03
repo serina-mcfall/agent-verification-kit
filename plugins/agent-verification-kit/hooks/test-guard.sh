@@ -67,7 +67,29 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')
-TARGET=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty')
+
+# THE TARGET KEY IS NOT THE SAME ACROSS TOOLS, and assuming it was left one of the
+# four tools in this hook's own matcher completely unguarded.
+#
+# Found 2026-09-04 by an adversarial review of the code. `hooks.json` matches
+# `Edit|Write|MultiEdit|NotebookEdit` and the allow-list below names all four, but
+# this line read only `.tool_input.file_path`. NotebookEdit does not use that key —
+# its parameter is `notebook_path`, confirmed against the harness's own tool schema
+# rather than inferred. So every NotebookEdit call produced an empty TARGET, took
+# the "cannot classify it, so this call is allowed" branch, and exited 0. Every
+# time, for every notebook, whatever it contained.
+#
+# Worse than the miss was the message: it blamed a malformed payload, so a total,
+# systematic gap in one whole tool read as ordinary occasional noise.
+#
+# Why the 32 controls could not catch it: all of them build payloads with
+# `file_path`, because that is the key this line read. A suite written against the
+# implementation tests the implementation's assumptions back to itself. Section 10
+# now sends real NotebookEdit payloads, and was confirmed red before this changed.
+#
+# `file_path` is tried first because three of the four tools use it; the fallback
+# costs nothing when it is present.
+TARGET=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
 
 case "$TOOL" in
     Edit|Write|MultiEdit|NotebookEdit) ;;
@@ -75,7 +97,11 @@ case "$TOOL" in
 esac
 
 if [ -z "$TARGET" ]; then
-    echo "test-guard: $TOOL carried no file_path — cannot classify it, so this call is allowed and the hook is NOT enforcing on it." >&2
+    # Names BOTH keys, because "no file_path" was actively misleading for
+    # NotebookEdit: the key was never absent, it was never the one being read.
+    # A message that names the wrong cause sends the reader looking in the wrong
+    # place, which is how a systematic gap survives as background noise.
+    echo "test-guard: $TOOL carried neither .tool_input.file_path nor .tool_input.notebook_path — cannot classify it, so this call is allowed and the hook is NOT enforcing on it." >&2
     exit 0
 fi
 
