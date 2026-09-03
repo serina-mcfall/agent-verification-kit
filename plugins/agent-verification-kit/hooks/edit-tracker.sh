@@ -36,7 +36,29 @@ COUNTER="$PROJECT_DIR/.claude/.edit-count"
 # only costs a re-run, but a stamp cleared by unrelated work in another repository
 # trains you to reach for `touch .claude/.verified`, which is the habit that
 # actually defeats the gate. Precision here is about keeping the override rare.
-EDITED_FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+# NOTEBOOKEDIT USES A DIFFERENT KEY, and reading only file_path sent every notebook
+# edit down the cwd-fallback path below. Fixed 2026-09-04, on adoption into this
+# plugin, from Serina's review.
+#
+# This hook is wired for NotebookEdit, whose parameter is `notebook_path`, not
+# `file_path` — confirmed against the harness's own tool schema. With the key
+# missing, EDITED_FILE was empty and the fallback resolved the stamp from the
+# hook's CWD.
+#
+# THE SYMPTOM IS NOT "THE STAMP SURVIVES", which is what a same-repository test
+# reports and why this went unnoticed. It is that the WRONG repository's stamp is
+# cleared. Measured, cwd in alpha and a test notebook edited in beta:
+#
+#   alpha (never touched)   CLEARED    an unnecessary re-run
+#   beta  (was edited)      PRESENT    the edit was not invalidated
+#
+# Fail-open and fail-closed at once — which is the same pair this file's header
+# already records from 2026-08-10, arriving through a different door. The header
+# says "the file path is in the payload, so this hook can be exact"; that was true
+# only for the three tools that put it under file_path.
+#
+# Covered by test-edit-tracker-notebook.sh, confirmed red before this line changed.
+EDITED_FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
 STAMP_LIB="${STAMP_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/stamp-path.sh}"
 if [ -r "$STAMP_LIB" ]; then
     # shellcheck source=/dev/null

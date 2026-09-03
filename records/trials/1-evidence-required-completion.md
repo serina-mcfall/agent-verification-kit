@@ -46,7 +46,11 @@ running it:
 | `stamp-path.sh` | hard dependency of all three — `verify-gate.sh:103-129` sources it and **fails closed** on a commit if unreadable |
 | `check-models.sh` | invoked by `verify-gate.sh`'s roster branch, which also fails closed |
 
-### Two deliberate modifications
+### Three deliberate modifications
+
+> **Corrected 2026-09-04.** This section said **two** until Serina's review found a third. The count
+> is load-bearing — it is what a reviewer uses to bound what they must read — so it is corrected
+> here rather than left for someone to discover by diffing.
 
 1. **`post-bash.sh` truncated to its stamp section** (source lines 1–459 plus `exit 0`). The
    dropped tail (461–492) was session elapsed-time reporting: unrelated to verification, touching
@@ -57,6 +61,12 @@ running it:
    branch consuming it fails closed. An adopter's first commit touching `.claude/agents/*.md` would
    have been refused, citing a file they had never heard of. **A gate that cannot be satisfied is
    not a gate; it is a lockout.**
+3. **`edit-tracker.sh` now reads `notebook_path` as well as `file_path`** — added 2026-09-04 from
+   the review. NotebookEdit's target lives under `notebook_path`, so the hook fell to its cwd
+   fallback and cleared the **wrong repository's** stamp: fail-open for the repository that was
+   edited, fail-closed for the one that was not. Covered by `test-edit-tracker-notebook.sh`,
+   confirmed red first. The same one-line fix was applied to the live copy in `serina-learning`, so
+   the two do not diverge.
 
 ## What was thrown at it
 
