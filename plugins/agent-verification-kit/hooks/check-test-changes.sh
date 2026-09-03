@@ -113,6 +113,7 @@ declared_reason() {
 
 n_changed=0; n_test=0; n_declared=0; n_missing=0
 missing=()
+missing_paths=()   # paths alone, for the copy-pasteable remedy at the bottom
 declared=()
 
 while IFS= read -r path; do
@@ -127,6 +128,7 @@ while IFS= read -r path; do
     else
         n_missing=$((n_missing + 1))
         missing+=("$class  $path")
+        missing_paths+=("$path")
     fi
 done <<< "$CHANGED"
 
@@ -172,7 +174,7 @@ Add one trailer per path to any commit in this range:
 
 For example:
 
-    git commit -s --amend --trailer "Test-change: ${missing[0]#* } <reason>"
+    git commit -s --amend --trailer "Test-change: ${missing_paths[0]} <reason>"
 
 Amending is fine while the branch is unreviewed. If it has already been reviewed,
 add a new commit carrying the trailers rather than rewriting what was approved.

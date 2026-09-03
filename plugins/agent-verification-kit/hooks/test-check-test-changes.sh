@@ -221,5 +221,44 @@ check_rc "renaming a test to a non-test name still requires a declaration" 1
 check_says "and names the test path that disappeared" "tests/test_a.py"
 echo
 
+echo "10. THE PRINTED REMEDY MUST ACTUALLY WORK:"
+#
+# This control exists because of a defect in this kit's ancestor, recorded as its
+# issue #22: verify-gate.sh's refusal message documented an escape hatch, the
+# message was wrong about the runners the project had, and the escape hatch became
+# the trained route. The lesson was that a gate's message IS its user interface,
+# and an untested instruction is a guess printed with authority.
+#
+# So this does not check the wording. It extracts the command the script tells you
+# to run, runs it, and asserts the check then passes.
+fresh_repo
+echo "def test_a(): pass" > "$REPO/tests/test_a.py"
+GIT commit -qam "weaken"
+run
+check_rc "undeclared, as set up" 1
+
+suggested=$(printf '%s\n' "$OUT" | sed -n 's/.*--trailer "Test-change: \(.*\) <reason>".*/\1/p' | head -1)
+if [ -n "$suggested" ]; then
+    echo "ok    the message prints a suggested path: [$suggested]"; pass=$((pass + 1))
+else
+    echo "FAIL  the message printed no extractable suggestion"; fail=$((fail + 1))
+fi
+# No stray leading or trailing whitespace in what it tells you to paste. git
+# happens to normalise a leading space out of a trailer value, so this is
+# cosmetic rather than load-bearing — asserted anyway, because relying on another
+# tool to clean up after your output is how a cosmetic defect becomes a real one
+# the day the other tool stops doing it.
+if [ "$suggested" = "$(printf '%s' "$suggested" | tr -d '[:space:]')" ]; then
+    echo "ok    the suggested path carries no stray whitespace"; pass=$((pass + 1))
+else
+    echo "FAIL  the suggested path has stray whitespace: [$suggested]"; fail=$((fail + 1))
+fi
+
+GIT commit -q --amend --no-edit --trailer "Test-change: $suggested the assertion asserted the bug"
+run
+check_rc "running exactly what it told you to run makes the check pass" 0
+check_says "and the reason is reported back" "asserted the bug"
+echo
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

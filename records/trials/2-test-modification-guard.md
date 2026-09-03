@@ -183,13 +183,80 @@ Two things close it, in order:
 Step 1 is genuinely independent of the plugin question and can be done now. That matters: it means
 Stage 2 can reach `keep` on its CI half while Stage 1 is still `blocked` on delivery.
 
+---
+
+## Addendum — 2026-09-03, same session
+
+Written after the verdict above rather than folded into it, so the progression is legible.
+
+### Row 8 is now half-observed
+
+A workflow was written and pushed. **Run `33726749724` completed `success`** on
+`ubuntu-latest`, and its log shows nine `PASS test-*.sh` lines — every suite, on a clean runner,
+with `jq-1.7` present. That answers a question the local runs could not: the controls do not depend
+on this machine's state.
+
+| Job | Status |
+|---|---|
+| `controls` | **observed green in CI** — 9/9 suites, run `33726749724` |
+| `undeclared-test-changes` | **still not run** — it is `if: github.event_name == 'pull_request'` and no pull request exists |
+
+So the half with teeth still has not fired in CI. `fix` stands.
+
+### The guard was run against real history, twice
+
+Fixtures test the cases you thought of. These are the repository's own commits.
+
+1. **Clean case.** `check-test-changes.sh 4a56d78` over the Stage 2 commit range: *"2 files modified
+   or deleted, 0 of them tests or test config"* → **exit 0**. The seven newly-added test files were
+   correctly not gated, which is the added-file agreement defect (above) confirmed fixed on real
+   data rather than on a fixture.
+2. **Weakened case.** Branch `trial/undeclared-test-change` replaces `test-test-guard.sh`'s final
+   `[ "$fail" -eq 0 ]` with `exit 0`, so the suite can report failures and still pass — a real
+   weakening of a real file, committed. `check-test-changes.sh main` → **exit 1**, naming
+   `plugins/agent-verification-kit/hooks/test-test-guard.sh`. That branch is retained as the
+   fixture for the pull-request proof.
+
+### A third defect, found by reading the output rather than the code
+
+The refusal message's copy-pasteable example printed a **double space** after `Test-change:`,
+because `${missing[0]#* }` strips to the first space while the array entries are
+`class␠␠path`. Measured rather than assumed: `git` normalises the leading whitespace out of a
+trailer value, so the pasted command *did* work — **cosmetic, not functional.** Fixed anyway, via a
+parallel `missing_paths` array.
+
+The valuable part is the control it produced. `test-check-test-changes.sh` section 10 now
+**extracts the command the script tells you to run, runs it, and asserts the check then passes.**
+That is the defect recorded as this kit's ancestor's issue #22: a refusal message documented an
+escape hatch, the message was wrong about the runners the project had, and the escape hatch became
+the trained route. A gate's message is its user interface, and an untested instruction is a guess
+printed with authority.
+
+Controls: **42** in that suite, **362** kit-wide.
+
+### Revised numbers
+
+| Field | Was | Now |
+|---|---|---|
+| `true_positives` | 2 | **3** (added the printed-remedy formatting) |
+| controls observed | 133 new / 357 kit | **138 new / 362 kit** |
+| CI runs observed | 0 | **1** (`controls` job only) |
+| plugin installs observed | 0 | 0 |
+
+### What still closes this
+
+One thing, unchanged: **open a pull request from `trial/undeclared-test-change`** and confirm the
+`undeclared-test-changes` job fails it. The branch exists and is known to fail the check locally.
+Until that job has run once, "this fails a PR that weakens a test" is a claim about a workflow file
+rather than an observation.
+
 ## Record it
 
 ```bash
 <skill>/record.sh --kind review \
-  --summary "test-modification guard: fix — survives every bypass, ships with no workflow wired" \
+  --summary "test-modification guard: fix — survives every bypass, CI half never run on a PR" \
   --tags ci/hooks,ci/required-checks,process/verification \
   --field verdict=fix --field mechanism=test-modification-guard \
-  --field ci_seconds=0 --field false_positives=1 --field true_positives=2 \
+  --field ci_seconds=0 --field false_positives=1 --field true_positives=3 \
   --doc records/trials/2-test-modification-guard.md
 ```
