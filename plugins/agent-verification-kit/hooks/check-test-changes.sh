@@ -87,9 +87,29 @@ MERGE_BASE=$(git merge-base "$BASE" HEAD 2>/dev/null) \
 # deletion is caught, the addition is free. That is exactly the right reading —
 # moving a test away from the path that covered something IS the removal of that
 # coverage.
+#
+# `T` WAS MISSING AND THAT WAS A BLOCKER, found 2026-09-04 by an adversarial
+# review, not by this suite. Git reports a TYPE CHANGE — a tracked regular file
+# replaced by a symlink at the same path — as one `T` entry, neither `M` nor `D`.
+# `--diff-filter=MD` dropped it, so:
+#
+#   rm tests/foo_test.py && ln -s /dev/null tests/foo_test.py && git commit
+#     git diff --name-status         -> T   tests/foo_test.py
+#     git diff --diff-filter=MD      -> (nothing)
+#
+# This script then printed "0 to declare" and exited 0. The content a runner would
+# read had been replaced wholesale, with no declaration and a clean CI result — and
+# test-guard.sh cannot see it either, because the swap arrives as Bash rather than
+# as an Edit. NEITHER HALF SAW IT, which is a direct contradiction of the claim at
+# the top of this file that a diff shows a test changed however it changed.
+#
+# Why 42 controls missed it: every fixture modified, deleted, added or renamed a
+# file. Not one changed a file's TYPE. A suite built from the cases you thought of
+# cannot find a case you did not. Section 11 of the control suite now covers it,
+# and was confirmed red before this line changed.
 # ---------------------------------------------------------------------------
-CHANGED=$(git diff --no-renames --name-only --diff-filter=MD "$MERGE_BASE" HEAD 2>/dev/null) \
-    || die "'git diff --no-renames --name-only --diff-filter=MD $MERGE_BASE HEAD' failed. An errored diff is not an empty diff."
+CHANGED=$(git diff --no-renames --name-only --diff-filter=MDT "$MERGE_BASE" HEAD 2>/dev/null) \
+    || die "'git diff --no-renames --name-only --diff-filter=MDT $MERGE_BASE HEAD' failed. An errored diff is not an empty diff."
 
 # Trailers across the whole range, one per line, value only.
 TRAILERS=$(git log --format='%(trailers:key=Test-change,valueonly)' "$MERGE_BASE..HEAD" 2>/dev/null) \

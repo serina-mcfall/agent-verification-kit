@@ -260,5 +260,51 @@ check_rc "running exactly what it told you to run makes the check pass" 0
 check_says "and the reason is reported back" "asserted the bug"
 echo
 
+echo "11. A TYPE CHANGE IS A CHANGE — swapping a test file for a symlink:"
+#
+# WHY THIS CONTROL EXISTS. `--diff-filter=MD` covers Modified and Deleted, and git
+# has a third status this mechanism cares about: `T`, type change. Replacing a
+# tracked regular file with a symlink at the SAME PATH is one `T` entry, neither
+# `M` nor `D`, so the filter dropped it entirely and this script reported
+# "0 to declare" and exited 0.
+#
+# The content a test runner would read had been replaced wholesale — point the
+# symlink at /dev/null and the suite collects nothing — with no declaration and a
+# clean CI result. test-guard.sh cannot see it either, because the swap arrives as
+# Bash rather than as an Edit. So NEITHER HALF saw it, which contradicts this
+# file's own stated reason for existing: a diff shows that a test changed however
+# it changed.
+#
+# Every fixture above modifies, deletes, adds or renames. Not one changes a file's
+# TYPE, which is why 42 controls all passed over a hole this size. Found by an
+# adversarial reviewer, not by this suite.
+fresh_repo
+rm "$REPO/tests/test_a.py"
+ln -s /dev/null "$REPO/tests/test_a.py"
+GIT add -A >/dev/null
+GIT commit -qm "swap the test for a symlink to /dev/null"
+# Confirm git really recorded a type change, so a green result below cannot be
+# mistaken for "git did something else and the control tested nothing".
+status=$(GIT diff --no-renames --name-status base HEAD | awk '{print $1}')
+if [ "$status" = "T" ]; then
+    echo "ok    git records the swap as a type change (T), as this control assumes"; pass=$((pass + 1))
+else
+    echo "FAIL  git recorded '$status', not 'T' — this control is testing the wrong thing"; fail=$((fail + 1))
+fi
+run
+check_rc "a test swapped for a symlink, undeclared, fails" 1
+check_says "and the path is named" "tests/test_a.py"
+
+# The declared case must still pass, or the fix above would just be a blanket
+# refusal of type changes rather than a declaration requirement.
+fresh_repo
+rm "$REPO/tests/test_a.py"
+ln -s /dev/null "$REPO/tests/test_a.py"
+GIT add -A >/dev/null
+GIT commit -qm "swap it" --trailer "Test-change: tests/test_a.py replaced by a generated fixture symlink"
+run
+check_rc "the same swap, declared, passes" 0
+echo
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
