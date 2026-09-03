@@ -197,6 +197,17 @@ echo 'tests/test_auth.py  the assertion asserted the bug, not the behaviour' \
 git commit -s --trailer "Test-change: tests/test_auth.py the assertion asserted the bug"
 ```
 
+**Use `--trailer`. Do not hand-write the trailer into the message body.** Git parses trailers only
+from the **final paragraph** of a commit message, so a `Test-change:` line with a blank line and any
+further paragraph after it — a `Co-Authored-By`, a `Signed-off-by` added later — is recorded as
+**zero** trailers while sitting plainly visible in `git log`. It looks declared and is invisible to
+every tool that reads it.
+
+This cost the author of this kit three attempts on one commit. `check-test-changes.sh` now detects
+the case and names it, rather than reporting *"this branch changes tests without saying why"* to
+someone who has just said why at length. **The path must also be the full repo-relative path** —
+prefix matching, so a bare filename matches nothing.
+
 ### Wiring the CI half
 
 ```yaml
@@ -207,7 +218,7 @@ git commit -s --trailer "Test-change: tests/test_auth.py the assertion asserted 
 ```
 
 This repository runs it on itself — see [`.github/workflows/verification.yml`](.github/workflows/verification.yml),
-which also runs all 400 controls on every push.
+which also runs all 409 controls on every push.
 
 `fetch-depth: 0` is not optional. On a shallow clone the base ref does not resolve, and the script
 **exits 3** rather than reporting a clean run — every failure mode of a diff-based checker produces
@@ -274,10 +285,10 @@ bash test-edit-tracker-notebook.sh     #   5
 bash test-check-models.sh              #  16
 bash test-classify-test-paths.sh             #  68
 bash test-guard-test-changes.sh                #  46
-bash test-check-test-changes.sh        #  54
+bash test-check-test-changes.sh        #  63
 ```
 
-**400 controls**, and they run on every push — see the badge-less truth in
+**409 controls**, and they run on every push — see the badge-less truth in
 [Actions](https://github.com/serina-mcfall/agent-verification-kit/actions).
 
 ### Naming, and why it is load-bearing

@@ -364,5 +364,70 @@ run
 check_rc "running exactly what it printed clears the check" 0
 echo
 
+echo "13. A TRAILER IN THE WRONG PARAGRAPH must be named, not left baffling:"
+#
+# WHY THIS CONTROL EXISTS. Git parses trailers only from the FINAL PARAGRAPH of a
+# commit message. A hand-written `Test-change:` line followed by a blank line and
+# any further paragraph — a Co-Authored-By, a Signed-off-by added later — is
+# recorded as ZERO trailers while sitting plainly visible in `git log`.
+#
+# This happened three times in a row to this kit's own author on 2026-09-04, and
+# the second attempt was the instructive one: all five paths were correct and the
+# check still reported every one of them undeclared. The refusal said 'this branch
+# changes tests without saying why' to someone who had just said why, at length,
+# in the commit message. That is a true statement and a useless one.
+#
+# The condition is exactly diagnosable: the message text contains line-initial
+# `Test-change:` entries that git did not parse as trailers. So the check can stop
+# being baffling and start being instructive.
+#
+# ADVISORY ONLY, AND SCOPED TO THE REFUSAL PATH. It adds explanation to a failure
+# that already exists; it must never create a new one. A branch that declares
+# everything correctly and also happens to quote the words 'Test-change:' at the
+# start of a line somewhere must still pass silently — control 13c asserts that.
+
+# 13a. The mistake itself: trailer above a later paragraph.
+fresh_repo
+echo "def test_a(): pass" > "$REPO/tests/test_a.py"
+GIT commit -qam "$(printf 'weaken the assertion\n\nTest-change: tests/test_a.py the assertion asserted the bug\n\nSigned-off-by: T <t@example.invalid>\n')"
+parsed=$(GIT log -1 --format='%(trailers:key=Test-change,valueonly)' | grep -c . || true)
+if [ "$parsed" = 0 ]; then
+    echo "ok    git really does parse 0 trailers here, as this control assumes"; pass=$((pass + 1))
+else
+    echo "FAIL  git parsed $parsed trailers — this control is testing the wrong thing"; fail=$((fail + 1))
+fi
+run
+check_rc "the path is still reported undeclared" 1
+check_says "AND the message names the real cause" "final paragraph"
+check_says "and it says how many were written versus parsed" "written but not parsed"
+check_says "and it points at the remedy that works" "--trailer"
+
+# 13b. Vacuity guard: a refusal with NO Test-change text must NOT carry the
+#      diagnostic, or it is printed unconditionally and means nothing.
+fresh_repo
+echo "def test_a(): pass" > "$REPO/tests/test_a.py"
+GIT commit -qam "weaken it, saying nothing at all"
+run
+check_rc "a plain undeclared change still fails" 1
+if printf '%s' "$OUT" | grep -q 'final paragraph'; then
+    echo "FAIL  the diagnostic was printed with no Test-change text present"; fail=$((fail + 1))
+else
+    echo "ok    the diagnostic is absent when nothing was written"; pass=$((pass + 1))
+fi
+
+# 13c. A correctly declared branch passes silently, even though its message
+#      contains a line-initial Test-change entry.
+fresh_repo
+echo "def test_a(): pass" > "$REPO/tests/test_a.py"
+GIT commit -qam "x" --trailer "Test-change: tests/test_a.py properly placed"
+run
+check_rc "a correct declaration passes" 0
+if printf '%s' "$OUT" | grep -q 'final paragraph'; then
+    echo "FAIL  the diagnostic leaked onto a passing run"; fail=$((fail + 1))
+else
+    echo "ok    no diagnostic on a passing run"; pass=$((pass + 1))
+fi
+echo
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

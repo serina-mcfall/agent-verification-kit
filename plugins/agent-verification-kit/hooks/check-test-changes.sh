@@ -115,6 +115,12 @@ CHANGED=$(git diff --no-renames --name-only --diff-filter=MDT "$MERGE_BASE" HEAD
 TRAILERS=$(git log --format='%(trailers:key=Test-change,valueonly)' "$MERGE_BASE..HEAD" 2>/dev/null) \
     || die "'git log' failed reading Test-change trailers over $MERGE_BASE..HEAD."
 
+# The raw message bodies, used for ONE purpose: diagnosing a declaration that was
+# written but not parsed. Not a fallback — a trailer git did not parse does not
+# count, and accepting the raw text would let a mention inside prose authorise a
+# change. See the diagnostic in the refusal path below.
+RAW_MSGS=$(git log --format='%B' "$MERGE_BASE..HEAD" 2>/dev/null) || RAW_MSGS=""
+
 declared_reason() {
     local target="$1" line reason
     while IFS= read -r line || [ -n "$line" ]; do
@@ -195,6 +201,58 @@ fi
 
 printf '\n  UNDECLARED — this branch changes tests without saying why:\n' >&2
 for m in "${missing[@]}"; do printf '    %s\n' "$m" >&2; done
+
+# ---------------------------------------------------------------------------
+# THE TRAILER-PARAGRAPH DIAGNOSTIC.
+#
+# Git parses trailers only from the FINAL PARAGRAPH of a commit message. A
+# hand-written `Test-change:` line followed by a blank line and any further
+# paragraph — a Co-Authored-By, a Signed-off-by added later — is recorded as zero
+# trailers while sitting plainly visible in `git log`.
+#
+# This cost this kit's own author three attempts on 2026-09-04, and the second was
+# the instructive one: all five paths were correct and every one was still
+# reported undeclared. The refusal said "this branch changes tests without saying
+# why" to someone who had just said why, at length, in the commit message. True,
+# and useless.
+#
+# The condition is exactly diagnosable, so it is named. Line-initial entries are
+# counted rather than any occurrence, so that prose ABOUT this message — including
+# the sentence you are reading, which will appear in a commit — does not trip it.
+#
+# ADVISORY, AND ONLY HERE. It explains a refusal that has already been decided; it
+# never causes one. A branch that declares everything correctly passes silently
+# even if its message quotes these words, which control 13c asserts. That
+# placement is deliberate: a diagnostic that fires on a green run is noise, and
+# noise is what teaches people to stop reading stderr.
+# ---------------------------------------------------------------------------
+literal_decls=$(printf '%s\n' "$RAW_MSGS" | grep -cE '^[[:space:]]*Test-change:[[:space:]]*[^[:space:]]' || true)
+parsed_decls=$(printf '%s\n' "$TRAILERS" | grep -c . || true)
+if [ "$literal_decls" -gt "$parsed_decls" ]; then
+    # Grammatical, because this text IS the user interface of the check and
+    # "1 line(s) ... so 1 were" reads as carelessness in a message whose whole job
+    # is to be believed. It also costs more to read for anyone the wording
+    # stumbles, which is reason enough on its own.
+    unparsed=$(( literal_decls - parsed_decls ))
+    [ "$literal_decls" = 1 ] && n_lines="1 line" || n_lines="$literal_decls lines"
+    [ "$unparsed" = 1 ] && n_lost="1 was" || n_lost="$unparsed were"
+    cat >&2 << EOF
+
+  ⚠ You appear to have written declarations that git did not parse.
+    $n_lines beginning 'Test-change:' are in this range's commit messages, but
+    git parsed $parsed_decls as trailers — so $n_lost written but not parsed, and a
+    trailer git does not parse does not count.
+
+    Git reads trailers ONLY from the final paragraph of a commit message. A
+    'Test-change:' line with a blank line and any further paragraph after it — a
+    Co-Authored-By, a Signed-off-by added later — is invisible to the parser
+    while staying plainly visible in git log.
+
+    Let git place them rather than writing them by hand:
+        git commit -s --trailer "Test-change: <path> <reason>"
+EOF
+fi
+
 cat >&2 << EOF
 
 A test is the signal that says whether the code works, and test configuration can
