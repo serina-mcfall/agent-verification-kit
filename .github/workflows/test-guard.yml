@@ -1,0 +1,77 @@
+name: verification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The kit's own controls. If these do not run in CI, the kit is asking adopters
+  # to trust a suite whose last known state was on the author's laptop.
+  controls:
+    name: controls (357)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: jq is present
+        # test-guard.sh and the stamp hooks parse their payloads with jq, and both
+        # announce non-enforcement rather than blocking when it is missing. So a
+        # runner without jq would run these suites against hooks that are quietly
+        # standing aside — green, and measuring nothing.
+        run: jq --version
+
+      - name: controls
+        working-directory: plugins/agent-verification-kit/hooks
+        run: |
+          set -euo pipefail
+          fail=0
+          for suite in \
+            test-stamp-path.sh \
+            test-verify-gate.sh \
+            test-verify-gate-portability.sh \
+            test-post-bash.sh \
+            test-edit-tracker.sh \
+            test-check-models.sh \
+            test-test-patterns.sh \
+            test-test-guard.sh \
+            test-check-test-changes.sh
+          do
+            echo "::group::$suite"
+            if bash "$suite"; then
+              echo "PASS $suite"
+            else
+              echo "::error title=$suite::controls failed"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          # EVERY SUITE RUNS BEFORE ANYTHING FAILS THE JOB. Exiting on the first
+          # failure tells you one thing; running them all tells you whether the
+          # breakage is local or general, which is the more useful answer when a
+          # shared library like test-patterns.sh regresses.
+          exit "$fail"
+
+  # The CI half of the test-modification guard, applied to this repository.
+  undeclared-test-changes:
+    name: undeclared test changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # NOT OPTIONAL. On a shallow clone the base ref does not resolve, the
+          # diff comes back empty, and an empty diff is indistinguishable from
+          # "no tests were touched". check-test-changes.sh exits 3 rather than 0
+          # in that case, so the job fails loudly instead of passing — but the
+          # right fix is to fetch the history, not to tolerate exit 3.
+          fetch-depth: 0
+
+      - name: refuse undeclared test changes
+        run: |
+          bash plugins/agent-verification-kit/hooks/check-test-changes.sh \
+            "origin/${{ github.event.pull_request.base.ref }}"

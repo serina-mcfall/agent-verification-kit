@@ -1,5 +1,5 @@
 {
-  "description": "Evidence-required completion. post-bash writes a verification stamp when a test or build command passes; edit-tracker clears it when a file changes; verify-gate refuses a commit without a fresh one. All three resolve the stamp through stamp-path.sh, which decides WHICH repository's stamp is at stake.",
+  "description": "Evidence-required completion plus a test-modification guard. post-bash writes a verification stamp when a test or build command passes; edit-tracker clears it when a file changes; verify-gate refuses a commit without a fresh one; test-guard refuses to modify an existing test or test config without a declaration naming it. The stamp trio resolves through stamp-path.sh; the guard classifies paths through test-patterns.sh. check-test-changes.sh is the CI half of the guard and is invoked by your workflow, not by a hook.",
   "hooks": {
     "PreToolUse": [
       {
@@ -8,6 +8,15 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/verify-gate.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/test-guard.sh\""
           }
         ]
       }

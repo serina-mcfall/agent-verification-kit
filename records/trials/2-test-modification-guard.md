@@ -1,0 +1,195 @@
+# Trial — test-modification guard
+
+**Stage** 2 · **Started** 2026-09-03 · **Closed** — open
+**Where** `serina-mcfall/agent-verification-kit` · **Verdict** `fix`
+
+---
+
+## What this mechanism is meant to catch
+
+A test, or test configuration, changed to make a red suite green.
+
+## What was set up
+
+Two halves and a shared classifier, all new code.
+
+| File | Lines | Role |
+|---|---|---|
+| `test-patterns.sh` | ~200 | sourced classifier — a path is `test`, `test-config`, or `other` |
+| `test-guard.sh` | ~200 | `PreToolUse` on `Edit\|Write\|MultiEdit\|NotebookEdit` — refuses an undeclared modification |
+| `check-test-changes.sh` | ~170 | CI half — reads the branch diff, requires a `Test-change:` trailer per path |
+
+`hooks.json` gained a second `PreToolUse` entry. `check-test-changes.sh` is invoked by a workflow,
+not by a hook, and is therefore the only part of this kit that does not depend on the plugin
+delivery mechanism Stage 1 could not prove.
+
+### Searched before prescribing
+
+Per this programme's first rule, recorded either as a location or as a named search that found
+nothing:
+
+| Searched for | Result |
+|---|---|
+| `test-change` as an existing convention | **absent as code** — appears only in the two buzz planning documents, i.e. proposed, never built |
+| `test.modification` / `test-mod-guard` | **absent as code** — same two documents |
+| `git-safety.sh` covering test paths | **absent** — it blocks destructive git operations only; no test-path logic, no overlap |
+| an existing buzz workflow doing this | **absent** — 10 `launchpad-*` workflows exist, none is a test guard |
+
+### Why the classifier is generous, and why that is the design
+
+The predecessor of this mechanism named `crates/**` Rust and `.spec.ts` only. An adversarial review
+counted what that missed in one repository: **610** Desktop `.test.mjs`, **156** Flutter
+`_test.dart`, **100** Tauri Rust and **121** Python test files — including the tests for the very
+checker the plan proposed to modify. A guard matching a fraction of the suites reports success
+while everything it does not recognise is edited freely.
+
+So the bias is deliberate: over-match rather than under-match. A false positive costs one
+declaration line; a false negative is the bypass. `.claude/test-guard.conf` exists so a repository
+can narrow it, because a guard nobody can narrow is a guard that gets switched off wholesale.
+
+### Two classes, not one
+
+`test-config` is a separate class because *"make the failing test pass"* has two shapes and only
+one of them touches a test file. `retries: 2` in `playwright.config.ts` silences a real race
+without editing a single assertion, and a guard watching only `*_test.*` never sees it. Clipboard
+Health (2026-04-21) recorded agents responding to flakes exactly this way.
+
+## What was thrown at it
+
+| # | Input | Expected | Actual | ✅/❌ |
+|---|---|---|---|---|
+| 1 | `test-test-patterns.sh` — 8 ecosystems, directory layouts, 8 near-misses, config precedence, malformed config | 64 pass | 64 pass, 0 fail | ✅ |
+| 2 | `test-test-guard.sh` — refusal, declaration, staleness, repo scoping, visible non-enforcement | 32 pass | 32 pass, 0 fail | ✅ |
+| 3 | `test-check-test-changes.sh` — modify, delete, rename, added-file agreement, could-not-determine | 37 pass | 37 pass, 0 fail | ✅ |
+| 4 | **Bypass attempts, hook half** — another path · blanket `*` · a glob · a path inside someone else's reason · a commented-out line | all refused | all refused | ✅ |
+| 5 | **Bypass attempts, CI half** — trailer for another path · path inside a reason · blanket `*` · declaring 1 of 2 · rename to a non-test name | all refused | all refused | ✅ |
+| 6 | **Could-not-determine** — unresolvable base ref · missing classifier · not a repository | exit **3**, never 0 | exit 3 in all three | ✅ |
+| 7 | **The plugin actually delivering `test-guard.sh`** | the hook fires from `${CLAUDE_PLUGIN_ROOT}` | **NOT RUN** | ⚠️ |
+| 8 | **`check-test-changes.sh` in a real CI workflow** | fails a PR that weakens a test | **NOT RUN** | ⚠️ |
+
+**Total: 133 new controls, 0 failing.** Kit-wide: 357.
+
+Row 4 and 5 are the rows that decide whether this is a guard or a formality. Both halves match the
+declared path on its **first whitespace-delimited field**, so a path appearing inside another
+entry's free-text reason authorises nothing — and neither accepts a glob, so weakening forty tests
+costs forty declarations. A single `*` would have made the whole mechanism ceremony.
+
+---
+
+## What happened
+
+### ✅ What was great
+
+- **The bypass attempts all failed, including the two subtle ones.** A path mentioned inside
+  someone else's reason, and a rename to a name the classifier no longer calls a test. The second
+  is the one that would have shipped broken: with git's rename detection on, `git mv tests/test_a.py
+  src/retired_a.py` reports as a single `R` that an added-and-modified filter drops entirely, so
+  retiring a test would have needed no declaration at all.
+- **Creation is free, and both halves now agree on it.** Adding a test is never blocked and never
+  needs a trailer. Taxing new tests would train agents to avoid writing them, which is worse than
+  anything this guard prevents.
+- **Three exit codes in the CI half, not two.** `0` checked-and-clean, `1` checked-and-undeclared,
+  `3` could-not-check. Every failure mode of a diff-based checker produces an empty list, and an
+  empty list otherwise looks identical to "no tests were touched".
+
+### ⚠️ What needs work
+
+- **Row 7 — the hook's delivery is still unproven**, exactly as in Stage 1 and for the same reason:
+  no plugin install has been observed.
+- **Row 8 — the CI half has never run in CI.** It has been run against fixtures and against this
+  repository's own history, both from a shell. No workflow file ships with this kit yet, so the
+  `fetch-depth: 0` requirement is documented in the README and enforced by nothing.
+- **The 30-minute TTL on `.claude/.test-change` is asserted, not reasoned.** It was chosen to match
+  the verification stamp for consistency of expectation. Nobody has measured whether 30 minutes is
+  right for a refactor that legitimately touches many test files.
+
+### ❌ What broke
+
+Nothing broke in testing. **Two defects were found by reasoning about the code rather than by
+running it**, and both are recorded because the manner of finding them matters:
+
+1. **A `2>/dev/null` on the classifier's config reads** would have silenced every configuration
+   warning the function immediately above it claimed to emit loudly. Caught while writing the
+   controls, before the first run. That is the fail-open shape recorded as INC-0003 — an absent
+   input producing empty output that reads as a pass — reproduced by the author of a comment
+   warning against it.
+2. **The two halves disagreed about added files** (above). Caught by asking what this script would
+   say about the very commit that introduces it: nine new test files, not one of them a weakening,
+   all nine flagged. Neither existing control would have caught this, because every fixture
+   modified a test rather than adding one.
+
+Defect 2 is the more instructive. **A test suite built from the cases you thought of cannot find a
+case you did not think of.** What found it was running the mechanism against real data — its own
+repository — rather than against fixtures.
+
+### 🗑️ What should go
+
+Nothing yet. `*/e2e/*` and `*/spec/*` in the default classifier are the widest patterns and the
+most likely future `drop` candidates — `docs/spec/api.md` classifying as a test is asserted in the
+controls as a **known** false positive so that nobody silently narrows it without seeing the trade.
+
+---
+
+## The numbers
+
+| Field | Value | Notes |
+|---|---|---|
+| `ci_seconds` | 0 | no workflow yet; the three suites run locally in a few seconds |
+| `true_positives` | 2 | the silenced-warnings fail-open; the added-file disagreement |
+| `false_positives` | 1 | `docs/spec/api.md` → `test`. Known, asserted, and narrowable via `.claude/test-guard.conf` |
+| controls observed | 133 | new this stage; 357 kit-wide, 0 failing |
+| **plugin installs observed** | **0** | unchanged from Stage 1 |
+| **CI runs observed** | **0** | |
+
+---
+
+## What this trial could NOT determine
+
+- **Whether the hook is delivered by the plugin.** Unchanged from Stage 1 and blocking for the same
+  reason. Nothing here has fired from `${CLAUDE_PLUGIN_ROOT}`.
+- **Whether the CI half works in CI.** It has only ever been invoked from an interactive shell. The
+  `fetch-depth: 0` failure mode is the one most likely to bite, and it is the one exercised least —
+  a shallow clone was simulated by passing a bad ref, which is not the same thing.
+- **Whether the declaration friction is tolerable.** Author-tested only, on fixtures. A guard that
+  fires correctly and annoys five people is a failure this trial reports as a success. The
+  `false_positives` count of 1 is measured against controls I wrote, not against a week of real
+  work.
+- **Whether the classifier's coverage holds outside the ecosystems I know.** Eight are covered.
+  Elixir, Scala, Swift, Haskell and Clojure conventions are guesses or absent.
+- **Whether `assert_eq!(a, a)` gets past it.** It does, by design and by arithmetic — the assertion
+  count is unchanged, so this shows as a *declared or undeclared change*, never as a *weakening*.
+  Stage 4's mutation layer is the only thing that measures whether assertions still bite, and it
+  will ship advisory. **This is a real remaining gap, not a covered one.**
+
+---
+
+## Verdict
+
+**`fix`** — and unlike Stage 1 this is `fix` rather than `blocked`, because there is a named defect
+with a named owner rather than only an unrun test.
+
+The mechanism works and survived every bypass thrown at it. But **it ships with no workflow file**,
+which means the half of it that has actual teeth — the half that reads git rather than a file the
+agent can write — is documented and unwired. A CI check nobody has wired into CI is a README claim.
+
+Two things close it, in order:
+
+1. **Ship a workflow.** `.github/workflows/test-guard.yml` calling
+   `check-test-changes.sh origin/main`, with `fetch-depth: 0`, and one deliberately-weakened test
+   in a branch to prove it fails a real pull request once.
+2. **Then the Stage 1 unblock steps**, which cover `test-guard.sh` too: install the plugin, restart,
+   and confirm a refusal came from the plugin's copy rather than a global symlink.
+
+Step 1 is genuinely independent of the plugin question and can be done now. That matters: it means
+Stage 2 can reach `keep` on its CI half while Stage 1 is still `blocked` on delivery.
+
+## Record it
+
+```bash
+<skill>/record.sh --kind review \
+  --summary "test-modification guard: fix — survives every bypass, ships with no workflow wired" \
+  --tags ci/hooks,ci/required-checks,process/verification \
+  --field verdict=fix --field mechanism=test-modification-guard \
+  --field ci_seconds=0 --field false_positives=1 --field true_positives=2 \
+  --doc records/trials/2-test-modification-guard.md
+```

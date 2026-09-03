@@ -57,6 +57,20 @@ unlock the gate. It will leave a trail saying so.
 mitigation is that the stamp records how it was earned, so a touched stamp is legible afterwards —
 not that touching is impossible.
 
+### The test-modification guard makes weakening deliberate, not impossible
+
+`test-guard.sh` checks a file — `.claude/.test-change` — that the agent it constrains can write.
+So it is **not** an integrity control against an agent that has decided to weaken a test. It cannot
+be; anything a hook reads from the working tree, the thing being hooked can also write.
+
+What it changes is *silent* versus *deliberate*. The failures the research documents are not
+adversaries defeating guards — they are an optimiser taking the cheapest route to green. Making
+that route cost one explicit line, naming one exact path, is most of the defence.
+
+`check-test-changes.sh` is the half with teeth, because a commit trailer is in the permanent record
+and visible in the pull request. It too can be written by an agent. What it buys is that **someone
+else sees it**. Prevention is a required status check plus a human, and that needs repo admin.
+
 ### Two of these limits were found the hard way
 
 They are not hypotheticals. See *What the comments are for* below.
@@ -133,6 +147,97 @@ A suite invoked by path also counts: `bash ./test-hooks.sh`, `python3 test_x.py`
 
 ---
 
+## The test-modification guard
+
+Two halves, deliberately. Neither is sufficient and each covers the other's blind spot.
+
+```mermaid
+flowchart TD
+    A["Agent edits a test file"] -->|"PreToolUse: Edit|Write"| G["test-guard.sh<br/>declared in .claude/.test-change?"]
+    G -->|"yes"| OK1["allowed, and it says<br/>what authorised it"]
+    G -->|"no"| NO1["EDIT BLOCKED<br/>names the path + the line to write"]
+
+    R["rm tests/x.py · another harness<br/>an IDE · a human"] -.->|"invisible to the hook"| D
+    A --> D["the branch diff"]
+    D -->|"CI"| CI["check-test-changes.sh<br/>Test-change: trailer per path?"]
+    CI -->|"yes"| OK2["exit 0"]
+    CI -->|"no"| NO2["exit 1 — visible in the PR"]
+
+    style G fill:#e8f4ea,stroke:#3d7a4e
+    style CI fill:#f6e6e6,stroke:#8a3a3a
+    style R fill:#f6efe0,stroke:#8a6d3a
+```
+
+| | `test-guard.sh` (hook) | `check-test-changes.sh` (CI) |
+|---|---|---|
+| Sees | Claude Code `Edit`/`Write` calls | any change, however it was made |
+| Misses | `rm`, other harnesses, IDEs, humans | nothing in the diff |
+| Speed | instant, before the write lands | after the fact |
+| Declaration | `.claude/.test-change`, 30-min TTL | `Test-change:` commit trailer |
+| Who sees it | you | **reviewers** |
+
+**Creating a new test is never blocked.** The hook fires only when the target already exists.
+Taxing new tests would train agents to avoid writing them, which is worse than anything this
+prevents.
+
+**Two classes, reported separately.** `test` is the assertions. `test-config` is
+`playwright.config.ts`, `jest.config.*`, `pytest.ini`, `nextest.toml` and friends — because
+`retries: 2` makes a failing test pass without touching a single assertion, and that is the
+documented flake response this guard exists to slow down.
+
+**A declaration names one exact path.** No globs, no `*`. Weakening forty tests costs forty lines.
+That property is the only reason the file is worth having.
+
+```bash
+# the hook's declaration
+echo 'tests/test_auth.py  the assertion asserted the bug, not the behaviour' \
+  >> .claude/.test-change
+
+# the CI half's declaration
+git commit -s --trailer "Test-change: tests/test_auth.py the assertion asserted the bug"
+```
+
+### Wiring the CI half
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0          # REQUIRED — a shallow clone cannot resolve the base ref
+- run: bash plugins/agent-verification-kit/hooks/check-test-changes.sh origin/main
+```
+
+This repository runs it on itself — see [`.github/workflows/test-guard.yml`](.github/workflows/test-guard.yml),
+which also runs all 357 controls on every push.
+
+`fetch-depth: 0` is not optional. On a shallow clone the base ref does not resolve, and the script
+**exits 3** rather than reporting a clean run — every failure mode of a diff-based checker produces
+an empty list, and an empty list otherwise looks exactly like "no tests were touched". Three exit
+codes, never two:
+
+| Exit | Meaning |
+|---|---|
+| `0` | checked, and every test change is declared |
+| `1` | checked, and something is undeclared |
+| `3` | **could not check** — bad base ref, no repo, missing classifier |
+
+### Narrowing it
+
+The classifier is deliberately generous — a false positive costs one declaration, a false negative
+is the bypass. Narrow it per repository with `.claude/test-guard.conf`:
+
+```
+# vendored suites and generated fixtures are not ours to declare
+ignore  vendor/*
+ignore  */fixtures/generated_*
+# this repo's contract tests live somewhere unusual
+test    contracts/*.yaml
+```
+
+A malformed line is named on stderr and skipped; an unreadable file says plainly that your globs
+are **not** in force. It never fails silently into defaults.
+
+---
+
 ## What the comments are for
 
 `verify-gate.sh` is 380 lines, of which roughly 120 are logic. The rest is a written record of
@@ -160,12 +265,20 @@ Every script ships with its own controls, in the same directory.
 
 ```bash
 cd plugins/agent-verification-kit/hooks
-bash test-stamp-path.sh
-bash test-verify-gate.sh
-bash test-post-bash.sh
-bash test-edit-tracker.sh
-bash test-check-models.sh
+bash test-stamp-path.sh              #  25 controls
+bash test-verify-gate.sh             #  20
+bash test-verify-gate-portability.sh #   3
+bash test-post-bash.sh               # 148
+bash test-edit-tracker.sh            #  12
+bash test-check-models.sh            #  16
+bash test-test-patterns.sh           #  64
+bash test-test-guard.sh              #  32
+bash test-check-test-changes.sh      #  37
 ```
+
+**357 controls.** Every suite opens with a vacuity guard — a control asserting that ordinary,
+innocent input is *not* flagged — because a classifier that says "test" to everything and a guard
+that blocks everything would both pass a coverage count and be useless.
 
 Mechanisms are additionally trialled against hostile input before they ship. Trial logs live in
 `records/trials/`, each ending in one of four verdicts — `keep`, `fix`, `drop`, `blocked`. **Nothing
@@ -180,16 +293,26 @@ Staged, one mechanism per stage, each proven before the next.
 
 | Stage | Mechanism | State |
 |---|---|---|
-| 1 | Evidence-required completion — the stamp protocol above | **this release** |
-| 2 | Test-modification guard — no weakening a test without a declaration | planned |
+| 1 | Evidence-required completion — the stamp protocol above | **shipped** |
+| 2 | Test-modification guard — hook + CI twin | **shipped** |
 | 3 | `flake-triage` — flaky reported as its own state, never silently retried | planned |
 | 4 | `mutation-gate` — diff-scoped, advisory | planned |
 | 5 | `severity-floor` — trivia fixed in place, never failing a gate | planned |
 
-Stage 2 exists because the stamp cannot catch a weakened assertion. Stage 4 exists because the
-test-modification guard cannot catch assertion weakening with an **unchanged** assertion count.
-Each stage covers the previous one's stated blind spot; where nothing covers it, this table and the
-section at the top of this file say so.
+Each stage exists to cover the previous one's stated blind spot:
+
+- **Stage 2 exists because the stamp cannot catch a weakened assertion.** A suite that asserts
+  nothing still passes, and still earns a stamp.
+- **Stage 4 exists because Stage 2 cannot catch assertion weakening with an *unchanged* assertion
+  count.** `assert_eq!(a, a)` is the same number of lines as the assertion it replaced, so it shows
+  as a declared-or-undeclared *change* but never as a *weakening*. Mutation testing is the only
+  layer that measures whether the assertions still bite — and it will ship advisory, so this is a
+  **real remaining gap, not a covered one**.
+- **Stage 3 exists because none of the above distinguishes flaky from failed**, and an agent's
+  documented response to a flake is to add retries until it stops.
+
+Where nothing covers a gap, this table and the section at the top of this file say so rather than
+leaving it to be discovered.
 
 ---
 
