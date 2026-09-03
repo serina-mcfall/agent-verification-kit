@@ -482,13 +482,22 @@ the first time.
 
 ### What this addendum did NOT determine
 
-- **Whether anyone sees the authorisation.** Lines 213–222 of `guard-test-changes.sh` exist to
-  announce *"$CLASS change to $REL is declared — <reason>. Allowed."* at the moment the declaration
-  is relied upon, on the stated reasoning that an authorisation nobody sees is indistinguishable
-  from no gate. **Probe 4 produced no such line to the agent.** Whether it reached the human
-  operator's screen is **unresolved** — asked, unanswered at time of writing. If it reached nobody,
-  the property is undelivered and this half warrants a `fix`, not a `keep`. Flagged here rather
-  than resolved in the mechanism's favour.
+- ~~**Whether anyone sees the authorisation.**~~ **ANSWERED the same day: nobody sees it.** Probe 4
+  produced no line to the agent, Serina confirmed she saw none either, and the hook was then run
+  directly with its output split by file descriptor: **exit 0, 122 bytes on stdout, 0 on stderr.**
+  The script is correct and emits exactly what lines 213–222 promise. A `PreToolUse` hook's exit-0
+  stdout goes to the **debug log** — *"For most events, Claude Code writes stdout to the debug log
+  and doesn't show it in the transcript"*, and `PreToolUse` is not one of the four documented
+  exceptions. Moving it to stderr is refuted by the same source: *"Stderr from a hook that exits 0
+  goes to the debug log only, never the transcript, and Claude never sees it."*
+  Recorded as **`INC-0013`** (medium, `detected_by: human`); sourced write-up with its own declared
+  gaps in [`research/claude-code-hook-output-channels.md`](../../research/claude-code-hook-output-channels.md);
+  full narrative in trial 1's Addendum 3.
+  **This does not downgrade the `keep`.** The verdict is about whether the guard refuses and
+  releases correctly, and it does. What is undelivered is a stated *transparency* property, which
+  is a separate claim with a separate record. **It remains open** — the fix depends on whether
+  `PreToolUse` honours `systemMessage`, which the documentation says is stated per-event in a
+  section that could not be retrieved. `could-not-determine`, not absent.
 - **`test-config` was never probed.** `playwright.config.ts` sits in the fixture, classifies
   correctly, and **was never edited**. So the `test-config` branch of the refusal — the branch
   written for the `retries: 2` flake response this guard exists to slow down — **has still never

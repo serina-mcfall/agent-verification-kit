@@ -351,15 +351,20 @@ be mistaken for a misclassification.
 
 ### What this addendum still could NOT determine
 
-- **Whether the plugin's non-blocking stdout reaches anyone.** `guard-test-changes.sh:213-222` is
-  written to announce *"this change is declared — <reason>. Allowed."* at the moment an
-  authorisation is relied upon, and `verify-gate.sh` is written to name the suite that earned a
-  stamp. **Neither line was seen** on probe 4 or probe 6. The agent does not receive allow-path
-  stdout; whether the human operator sees it is **unresolved and asked of Serina, unanswered at
-  time of writing.** If she saw nothing either, then *"say what authorised it"* is a documented
-  design property that is not delivered — and this file's own argument is that an authorisation
-  nobody sees is indistinguishable from no gate. **That would be a named defect and a `fix`, and it
-  is deliberately not being written up as one until the question is answered.**
+- ~~**Whether the plugin's non-blocking stdout reaches anyone.**~~ **ANSWERED the same day — it
+  reaches nobody. See Addendum 3 and `INC-0013`.** The question as originally written is left below
+  because the shape of it is the point: it was recorded as unresolved rather than assumed either
+  way, and the answer came from asking the operator and then measuring, not from either of us
+  guessing.
+  > `guard-test-changes.sh:213-222` is written to announce *"this change is declared — <reason>.
+  > Allowed."* at the moment an authorisation is relied upon, and `verify-gate.sh` is written to
+  > name the suite that earned a stamp. **Neither line was seen** on probe 4 or probe 6. The agent
+  > does not receive allow-path stdout; whether the human operator sees it is **unresolved and
+  > asked of Serina, unanswered at time of writing.** If she saw nothing either, then *"say what
+  > authorised it"* is a documented design property that is not delivered — and this file's own
+  > argument is that an authorisation nobody sees is indistinguishable from no gate. **That would
+  > be a named defect and a `fix`, and it is deliberately not being written up as one until the
+  > question is answered.**
 - **Whether two copies of a hook both run.** Duplicate stderr was predicted. Only the plugin's
   message appeared on both denials. Either the first denial short-circuits the chain or the global
   copy did not run — **not determined**, and worth knowing before the README tells adopters what
@@ -397,6 +402,87 @@ the evidence the protocol is built on.
 `keep` rather than `fix`, because no defect in the mechanism was found. The stdout-visibility
 question above is real and is **open**, not resolved in the mechanism's favour — if answered badly
 it warrants its own `fix`, and this verdict should be revisited rather than defended.
+
+---
+
+## Addendum 3 — the allow path reaches nobody, 2026-09-04
+
+Addendum 2 left one question open and refused to resolve it in the mechanism's favour. Serina
+answered it the same day: **she saw none of the text either.** Two absences are not a finding, so
+the claim was then measured rather than concluded.
+
+### What was measured
+
+Both hooks were invoked directly with synthetic payloads, stdout and stderr captured to separate
+files and counted in bytes.
+
+| Case | exit | stdout | stderr |
+|---|---|---|---|
+| undeclared `test-config` path | `2` | 0 bytes | **1009 bytes** |
+| declared, fresh, `test` path | `0` | **122 bytes** | 0 bytes |
+
+```
+test-guard: test change to tests/test_thing.py is declared — "…". Allowed.
+```
+
+**The scripts are correct.** They emit precisely what their comments promise, on stdout, at exit 0.
+`verify-gate.sh:387-389` has the same shape — 11 of its 31 `echo`s are unredirected.
+
+### The first attempt at this measurement was wrong, and the control caught it
+
+The first run sent a payload carrying `tool_input.file_path` but **no `tool_name`**. Both cases
+exited 0 in silence, which read exactly like "the hook is mute on both paths" — a plausible,
+tidy, wrong conclusion.
+
+It was caught because the *undeclared* case was run as a control and had to block. It didn't.
+`guard-test-changes.sh:94-97` matches `tool_name` against its four tools and exits 0 for anything
+else, so the whole probe had been standing the hook aside. **A measurement of an allow path is
+worthless without a deny control beside it**, and that is the same lesson as the four instances in
+Stage 2's Addendum 3 — the check that cannot fail.
+
+### Why it reaches nobody, from the documentation
+
+Full sourced note, with verbatim quotations and its own gaps declared:
+[`research/claude-code-hook-output-channels.md`](../../research/claude-code-hook-output-channels.md).
+
+> "For most events, Claude Code writes stdout to the debug log and doesn't show it in the
+> transcript."
+
+> "The exceptions are `UserPromptSubmit`, `UserPromptExpansion`, `SessionStart`, and
+> `PostModelSwitch`…"
+
+`PreToolUse` is not among them.
+
+**The obvious fix is refuted by primary source before anyone spent a commit on it:**
+
+> "Stderr from a hook that exits 0 goes to the debug log only, never the transcript, and Claude
+> never sees it."
+
+So moving the announcement to stderr changes nothing. It is the **exit code**, not the stream, that
+decides visibility. Had that not been checked, the "fix" would have been a second invisible message
+and this record would have carried a closed finding that was still open.
+
+The documented mechanism is `systemMessage` in JSON output — *"To surface a message to the user on
+any platform, return `systemMessage` in JSON output. Some events discard it or deliver it elsewhere,
+and each event's section says so."* **Whether `PreToolUse` is one of the events that discards it is
+`could-not-determine`:** the page was fetched three times and truncated at the same point each
+time, before the per-event sections.
+
+### Recorded, not fixed
+
+`INC-0013`, medium, `detected_by: human` — Serina's question is what found it. Refs `REV-0005` and
+`REV-0006`.
+
+**It does not reopen either verdict.** `keep` was earned on whether the mechanism refuses and
+releases correctly, and it does, observed six ways. What is broken is a *stated design property*,
+which is a different claim and gets its own record rather than being folded into a reversal. If a
+reader disagrees, the disagreement is visible here rather than hidden in an unexplained verdict.
+
+**Open, and deliberately not prescribed:** the fix depends on whether `PreToolUse` honours
+`systemMessage`, which is unestablished. The research note names two ways to settle it — read the
+untruncated reference, or wire a throwaway hook emitting a unique marker and look for it. Until one
+of those happens, the comments in both files claim a property the harness does not deliver, and
+`guard-test-changes.sh`'s own argument currently indicts the file it is written in.
 
 ---
 
