@@ -1,7 +1,8 @@
 # Trial — flake triage
 
 **Phase** 3 · **Started** 2026-09-04 · **Closed** — open
-**Where** `serina-mcfall/agent-verification-kit`, branch `feat/flake-triage` · **Verdict** `blocked`
+**Where** `serina-mcfall/agent-verification-kit`, branch `feat/flake-triage`
+**Verdict** `blocked` overall — **CI half `keep` as of Addendum 1**, hook half `blocked`
 
 ---
 
@@ -353,3 +354,120 @@ Findings already recorded, all referencing this document:
 | `NOTE-0014` | `check-controls` refused to run rather than run a subset |
 | `NOTE-0015` | Stage 3 has never gated a real commit — installed plugin is `0.1.0` |
 | `NOTE-0016` | two of six mutants were too weak to kill anything |
+
+---
+
+## Addendum 1 — the CI half fired, 2026-09-06
+
+Written after the verdict above rather than folded into it, so the progression is legible.
+
+### PR #5 went green, and that proved less than it looks
+
+[PR #5](https://github.com/serina-mcfall/agent-verification-kit/pull/5), run `33994509698`:
+
+| Job | Result |
+|---|---|
+| `controls` | **pass** — 13 suites on a clean runner |
+| `undeclared test changes` | **pass** — *"9 files modified or deleted, 3 of them tests or test config"*, all declared |
+| `declared flakes` | **pass** — `checked 8 commit(s) over origin/main..HEAD — no Flaky: trailers declared` |
+
+**The third row is a vacuity pass and must never be cited as proof the check bites.** It passed by
+finding nothing, because the branch declares no flakes. A green vacuity pass and a green
+everything-was-fine are indistinguishable in the checks list, which is the exact confusion this kit
+exists to name. Recorded as `NOTE-0017` so nobody later reads that row as evidence.
+
+Two smaller things the run settled:
+
+- **The step genuinely executed.** Confirmed from the raw job log, not from the green tick — the
+  script's own output line is present. A job can pass with a step that produced nothing.
+- **I predicted 6 commits; CI reported 8.** Both are right, and the gap is worth keeping. The local
+  run predated the trial-record commit, and `pull_request` checks out the **merge commit** rather
+  than the branch tip, adding one more. This is the same behaviour trial 2's Addendum 2 recorded: the
+  job answers *"would `main` break if this merged"*, not *"is the branch tip clean"* — the more
+  useful question, and not what a naive reading of the workflow predicts.
+
+### So it was given something to find
+
+[PR #6](https://github.com/serina-mcfall/agent-verification-kit/pull/6), branch
+`trial/malformed-flaky-trailer`, **draft, DO NOT MERGE** — the Stage 3 counterpart of
+`trial/undeclared-test-change`. Two commits, two distinct failure modes:
+
+| Commit | Fixture | Malformed how |
+|---|---|---|
+| `cdf5310` | `Flaky: npm test it is just flaky sometimes` via `--trailer` | names a command and a reason, **no `#issue`** |
+| `286caeb` | `Flaky: pytest tests/test_auth.py #99 races on the token clock` in the **body** | perfectly formed, and **git parsed zero trailers** |
+
+Both fixtures were verified to *be* what they claimed before being pushed, rather than assumed:
+`git log -1 --format='[%(trailers:key=Flaky,valueonly)]' 286caeb` returns `[]` while the same
+message contains the line at line 3.
+
+**Run `33994783542`:**
+
+| Job | Result |
+|---|---|
+| `controls` | pass |
+| `undeclared test changes` | pass — the fixtures are newly added non-test files, so nothing is confounded |
+| `declared flakes` | **FAIL** |
+
+```
+FLAKY TRAILER MALFORMED — checked 10 commit(s) over origin/main..HEAD
+  286caeb1  trial: a Flaky line git never parsed as a trailer (DO NOT MERGE)
+      A Flaky: line is written in this message but git did NOT parse it as a
+  cdf53105  trial: a Flaky trailer with no issue number (DO NOT MERGE)
+      No issue number. A flake with no issue is a flake nobody has agreed to fix,
+##[error]Process completed with exit code 1.
+```
+
+**Exit 1, not exit 3.** That distinction is the point: exit 3 is could-not-determine, and a job that
+fails because it could not check is not a job that fails because it found something. Conflating them
+is `INC-0006`. Both commits are named, each with its own reason, and the other two jobs passed — so
+the failure is attributable to the flaky check and nothing else.
+
+**The `286caeb` row is the one that mattered.** It is the only fail-open this CI half uniquely
+closes, and until this run it was covered solely by a control suite written against the
+implementation — which is precisely the failure mode that let the original `notebook_path` defect
+survive 32 controls in Stage 2.
+
+### Revised numbers
+
+| Field | Was | Now | Why |
+|---|---|---|---|
+| CI runs observed | 0 | **2** | PR #5 all-green, PR #6 with `declared flakes` failing |
+| CI refusals observed | 0 | **1** | run `33994783542`, exit 1, two commits named |
+| `ci_seconds` | 0 | **4** | the `declared flakes` job |
+| `false_positives` | 0 | **0** | `controls` and `undeclared test changes` both passed on the fixture branch — the check did not fire on anything it should not have |
+| `true_positives` | 0 | **0** | unchanged, and deliberately. Both refusals were of fixtures **written to be refused.** Under the ruled definition that is a mechanism working, not a defect caught |
+| plugin installs of this stage | 0 | **0** | unchanged |
+| controls | 512 | 512 | none added here |
+
+### Verdict, split
+
+| Half | Verdict | Change |
+|---|---|---|
+| `check-flaky-trailers.sh` (CI) | **`keep`** | **`blocked` → `keep` 2026-09-06.** Failed a real pull request with exit 1, naming both malformed commits, while the sibling jobs passed |
+| the hooks (`flake-ledger`, `post-bash`, `edit-tracker`, `verify-gate`) | **`blocked`** | unchanged. `NOTE-0015` — the installed plugin is still `0.1.0` and **none of this has ever constrained a real commit** |
+
+This is the same split Stage 2 reached, for the same reason, and it is recorded the same way: the CI
+half is independent of the plugin-delivery question and can be settled without it.
+
+**Two things the `keep` does not mean.** It does not mean parity with Stage 2's CI half — this one
+**cannot detect a missing trailer** and never will, because the stamp is gone by CI time
+(`NOTE-0012`). And it does not touch the headline limitation at the top of this document: **command
+narrowing is unaffected by anything in this addendum.**
+
+`REV-0010` (CI half, `keep`) and `REV-0011` (hooks, `blocked`).
+
+### What still closes the stage
+
+Two of the three items in the verdict above remain, unchanged:
+
+1. ~~Open the pull request so the jobs run.~~ **Done, both the vacuity case and the refusal.**
+2. **Install the merged plugin and `/reload-plugins`**, earn a genuinely flaky stamp in a live
+   session, confirm the refusal is attributed to `${CLAUDE_PLUGIN_ROOT}`.
+3. **Put the command-narrowing limitation in the README.**
+
+### Disposal
+
+PR #6 stays **open as a draft until a human closes it.** It is the only live evidence of this check
+refusing anything, and closing it would leave this record citing a run nobody can navigate to.
+**It must never be merged** — it carries two fixture files and two deliberately malformed commits.
