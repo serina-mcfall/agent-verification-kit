@@ -382,6 +382,98 @@ STAMP_BASIS=$(cut -d'|' -f3 "$VERIFIED" 2>/dev/null)
 # closing #100 with it still unread would repeat #22, which was closed with
 # its own stated fix unlanded and is why #100 exists.
 STAMP_CMD=$(cut -d'|' -f2 "$VERIFIED" 2>/dev/null)
+
+# ---------------------------------------------------------------------------
+# FOURTH FIELD: was this pass a RE-RUN? — Stage 3.
+#
+# `flaky` means post-bash saw this exact command FAIL within the ledger's window
+# with no edit since, so the pass is a re-run rather than a fix. Measured
+# 2026-09-04: that sequence used to write an ordinary stamp and unlock a commit,
+# and neither shipped stage noticed — Stage 1 sees only the final pass, Stage 2
+# never fires because no test file was touched.
+#
+# A MISSING FOURTH FIELD READS AS CLEAN. Stamps written before this existed have
+# three fields, and treating them as flaky would block every commit for thirty
+# minutes after an upgrade. It is a fail-open, it is bounded by the TTL, and it
+# is asserted in the suite so it stays deliberate.
+#
+# NO NEW DEPENDENCY. This reads a field and greps a file; it does not source
+# flake-ledger.sh. verify-gate is the one hook that can lock a session out, and
+# its header records what happened the last time a fail-closed check was placed
+# where an unrelated call could reach it.
+#
+# THE DECLARATION USES ` :: `, AND THAT IS THE OPPOSITE OF STAGE 2 ON PURPOSE.
+# guard-test-changes.sh matches declared PATHS by prefix, which is right — a path
+# is a token. A COMMAND IS NOT: `npm test` is a strict prefix of
+# `npm test -- --grep auth`, so prefix matching would let a declaration for
+# either authorise the other. Both directions are asserted as negative controls.
+# The delimiter makes the command an exact field. A command containing ` :: `
+# literally would be undeclarable; that is the stated limit of this format.
+# ---------------------------------------------------------------------------
+STAMP_FLAKE=$(cut -d'|' -f4 "$VERIFIED" 2>/dev/null)
+if [ "$STAMP_FLAKE" = flaky ]; then
+    FLAKY_REPO="${VERIFIED%/.claude/.verified}"
+    FLAKY_DECL="$FLAKY_REPO/.claude/.flaky"
+    FLAKY_AUTH=""
+    if [ -f "$FLAKY_DECL" ]; then
+        while IFS= read -r fline || [ -n "$fline" ]; do
+            case "$fline" in ''|\#*) continue ;; esac
+            case "$fline" in *' :: '*) ;; *) continue ;; esac
+            # %% takes the FIRST delimiter, so a reason containing ` :: ` cannot
+            # extend the command it claims to declare.
+            [ "${fline%% :: *}" = "$STAMP_CMD" ] || continue
+            # AN ISSUE NUMBER IS REQUIRED. Without it the declaration is
+            # "flaky, will look later", and the risk this mechanism exists to
+            # mitigate is a genuine bug quietly refiled as a flake. The kit
+            # checks the number is PRESENT; it can never check it is true.
+            case "${fline#* :: }" in *'#'[0-9]*) FLAKY_AUTH="${fline#* :: }"; break ;; esac
+        done < "$FLAKY_DECL"
+    fi
+
+    if [ -z "$FLAKY_AUTH" ]; then
+        # WHEN IT FAILED, because the ledger is repository-scoped and several
+        # sessions share it. Without the time this reads as "the gate is broken"
+        # rather than "that was my other session twenty minutes ago".
+        FLAKY_WHEN=""
+        if [ -r "$FLAKY_REPO/.claude/.failed-runs" ]; then
+            while IFS= read -r lline || [ -n "$lline" ]; do
+                [ "${lline#*|}" = "$STAMP_CMD" ] || continue
+                FLAKY_WHEN=" It failed at $(date -d "@${lline%%|*}" +%H:%M 2>/dev/null || echo '?') and passed at $(date -d "@$(cut -d'|' -f1 "$VERIFIED")" +%H:%M 2>/dev/null || echo '?'), with no edit between."
+                break
+            done < "$FLAKY_REPO/.claude/.failed-runs"
+        fi
+        {
+            echo "COMMIT BLOCKED — the suite that unlocked this commit FAILED first and passed on a re-run."
+            echo
+            echo "  command: $STAMP_CMD"
+            [ -n "$FLAKY_WHEN" ] && echo "  ${FLAKY_WHEN# }"
+            echo
+            echo "A pass that only happens on the second try is not evidence the code works — it is"
+            echo "evidence the suite is flaky, or that the failure was real and has been re-rolled"
+            echo "away. Re-running until green is the cheapest route to a stamp and the one this"
+            echo "check exists to make deliberate."
+            echo
+            echo "If the test is genuinely flaky, say so — one line, naming this exact command and"
+            echo "an issue that keeps it visible:"
+            echo
+            echo "  mkdir -p \"$FLAKY_REPO/.claude\""
+            echo "  echo '$STAMP_CMD :: #<issue> <why it is flaky, not broken>' >> \"$FLAKY_DECL\""
+            echo
+            echo "Then retry the commit. The declaration names THIS command only; a blanket entry"
+            echo "will not match, and the issue number is required so a real bug cannot be quietly"
+            echo "refiled as a flake."
+            echo
+            echo "If the first failure was real, fix the code. Any edit clears the record, and the"
+            echo "next pass is an ordinary one."
+        } >&2
+        exit 2
+    fi
+
+    # SAY WHAT AUTHORISED IT, at the moment it is relied upon.
+    echo "Verified $(( STAMP_AGE / 60 ))m ago, but FLAKY — '$STAMP_CMD' failed before it passed. Declared: $FLAKY_AUTH. Commit allowed."
+    exit 0
+fi
+
 [ -n "$STAMP_CMD" ] && STAMP_CMD=" by: $STAMP_CMD"
 case "$STAMP_BASIS" in
   observed) echo "Verified $(( STAMP_AGE / 60 ))m ago, exit code observed.${STAMP_CMD} Commit allowed." ;;
