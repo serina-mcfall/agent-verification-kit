@@ -119,6 +119,41 @@ if [ -f "$VERIFIED" ]; then
     rm -f "$VERIFIED"
 fi
 
+# --- Clear the flake ledger too — Stage 3 ------------------------------------
+#
+# WHY THIS IS LOAD-BEARING AND NOT HOUSEKEEPING.
+#
+# The flake detector calls a pass "flaky" when the SAME command failed recently
+# and nothing has changed since. Write a failing test -> implement -> pass is
+# also fail-then-pass, so without this line every legitimate red-green cycle
+# would be reported as a flake. This kit's own false-positive rule says a
+# mechanism that cries wolf is `fix` or `drop` however correct it is in
+# principle, and that is what it would become.
+#
+# Measured end to end on 2026-09-05 BEFORE this landed: with the ledger
+# uncleared, fail -> edit -> pass produced a stamp reading `flaky` — a false
+# positive on the most ordinary workflow there is.
+#
+# SAME SCOPE AS THE STAMP, deliberately. It is the ledger of the EDITED file's
+# repository, derived from the same $VERIFIED this hook just cleared rather than
+# resolved a second time — two resolutions of one question are two things that
+# can disagree, and getting it wrong here is a silent false negative in the
+# repository that was edited and a silent false positive in the one that was not.
+#
+# The bypass this creates is real and is stated rather than hidden: touching any
+# file forgets every recorded failure. It is not cheaper than compliance, though.
+# An edit lands in the diff where a reviewer sees it; the declaration is one line.
+FLAKE_LIB="${FLAKE_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/flake-ledger.sh}"
+if [ -r "$FLAKE_LIB" ]; then
+    # shellcheck source=/dev/null
+    . "$FLAKE_LIB" && flake_clear "${VERIFIED%/.claude/.verified}"
+else
+    # Soft, like everything else in this hook: it runs after the tool and cannot
+    # block. A stale ledger causes a false FLAKY later, which the gate reports
+    # and a human can clear — worse than correct, better than silent.
+    echo "edit-tracker: flake ledger missing at $FLAKE_LIB — a recorded failure will not be forgotten by this edit, so a later pass may report flaky. NOT enforcing correctly." >&2
+fi
+
 # Increment edit counter
 COUNT=0
 if [ -f "$COUNTER" ]; then

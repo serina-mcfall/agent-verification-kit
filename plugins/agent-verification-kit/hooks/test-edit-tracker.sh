@@ -176,6 +176,70 @@ else
     bad "an unrecognised mode falls to nofallback and warns" "got [$got] stderr: $(head -1 "$BOX/err")"
 fi
 
+# ---------------------------------------------------------------------------
+# AN EDIT CLEARS THE FLAKE LEDGER TOO — Stage 3.
+#
+# This hook already clears the verification stamp of the edited file's
+# repository. It now clears that repository's flake ledger in the same call, and
+# the reason is not tidiness: it is what stops the flake detector firing on
+# ordinary work.
+#
+# Write a failing test -> implement -> pass is ALSO fail-then-pass. Without this,
+# every legitimate red-green cycle would be reported as a flake, and this kit's
+# own false-positive rule says a mechanism that cries wolf is `fix` or `drop`
+# however correct it is in principle. Measured end to end on 2026-09-05 BEFORE
+# this landed: with the ledger uncleared, a fail, an edit, then a pass produced
+# a stamp reading `flaky` — a false positive on the most common workflow there is.
+#
+# The bypass it creates is real and stated rather than hidden: touch any file and
+# the memory is gone. It is not cheaper than compliance, though — an edit lands
+# in the diff where a reviewer sees it, and the declaration is one line.
+# ---------------------------------------------------------------------------
+ledger() { [ -f "$BOX/$1/.claude/.failed-runs" ] && printf PRESENT || printf CLEARED; }
+
+echo
+echo "an edit clears the flake ledger of the edited repository:"
+
+stamps
+printf '%s|npm test\n' "$(date +%s)" > "$BOX/beta/.claude/.failed-runs"
+printf '%s|npm test\n' "$(date +%s)" > "$BOX/alpha/.claude/.failed-runs"
+fire "$BOX/alpha" Edit "$BOX/beta/tests/test_b.py"
+if [ "$(ledger beta)" = CLEARED ]; then
+    ok "an edit in beta clears BETA's flake ledger"
+else
+    bad "an edit in beta clears BETA's flake ledger" "beta ledger=$(ledger beta)"
+fi
+# The same scoping the stamp has, for the same reason: clearing the wrong
+# repository's memory is a silent false negative in the repository that was
+# edited and a silent false positive in the one that was not.
+if [ "$(ledger alpha)" = PRESENT ]; then
+    ok "and it leaves ALPHA's flake ledger alone"
+else
+    bad "and it leaves ALPHA's flake ledger alone" "alpha ledger=$(ledger alpha)"
+fi
+
+# Non-vacuity: clearing must be driven by the edit, not by the helper. If the
+# ledger were absent to begin with, the assertions above would pass against a
+# hook that did nothing at all.
+stamps
+printf '%s|npm test\n' "$(date +%s)" > "$BOX/beta/.claude/.failed-runs"
+if [ "$(ledger beta)" = PRESENT ]; then
+    ok "the ledger really was there before the edit"
+else
+    bad "the ledger really was there before the edit" "beta ledger=$(ledger beta)"
+fi
+
+# A missing ledger must not turn an ordinary edit into an error.
+stamps
+rm -f "$BOX/beta/.claude/.failed-runs"
+fire "$BOX/alpha" Edit "$BOX/beta/tests/test_b.py"
+if [ "$(present beta)" = CLEARED ]; then
+    ok "an edit with no ledger present still clears the stamp, without erroring"
+else
+    bad "an edit with no ledger present still clears the stamp, without erroring" \
+        "beta stamp=$(present beta)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASSED" "$FAILED"
 [ "$FAILED" -eq 0 ] || exit 1
 exit 0

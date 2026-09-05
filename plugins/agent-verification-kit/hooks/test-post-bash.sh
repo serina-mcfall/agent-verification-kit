@@ -610,5 +610,90 @@ said_nothing quiet  "a multi-line PR body says nothing" \
   "$(printf 'gh pr create --body "verify:\nbash check-plan.sh docs/plan.md"')"
 said_nothing speaks "a piped suite still explains itself"  "npm test | tail -3"
 
+# --- FLAKE DETECTION — Stage 3 ------------------------------------------------
+#
+# A suite that FAILED and was then re-run until it PASSED, with no code change
+# between, used to write an ordinary stamp and unlock a commit. Measured
+# 2026-09-04: commit 9212df9 in a scratch repository. Stage 1 sees only the final
+# pass; Stage 2 never fires because no test file was touched. Run-until-green
+# costs one extra tool call and defeats both.
+#
+# The stamp gains a FOURTH field, `clean` or `flaky`. verify-gate.sh reads it.
+# A three-field stamp from before this change reads as clean — a documented
+# fail-open, bounded by the 30-minute TTL, asserted below so it is deliberate.
+
+# run_seq <cmd> <rc> — fire one command without clearing the stamp first, so a
+# sequence of runs can be built up. `stamped` above always clears, which is right
+# for isolated cases and wrong for testing what a SECOND run does.
+run_seq() {
+  python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]},"tool_response":{"exitCode":int(sys.argv[2])}}))' \
+    "$1" "$2" | ( cd "$box" && CLAUDE_PROJECT_DIR="$box" bash "$sut" >/dev/null 2>&1 )
+}
+field4() { cut -d'|' -f4 < "$box/.claude/.verified" 2>/dev/null; }
+reset_flake() { rm -f "$box/.claude/.verified" "$box/.claude/.failed-runs"; }
+check_eq() {
+  ran=$((ran+1))
+  if [[ "$2" == "$3" ]]; then ok "$1"; else nope "$1 — got '$3', wanted '$2'"; fi
+}
+
+# Not vacuous: an ordinary first-time pass must be CLEAN, or every case below is
+# satisfied by a hook that calls everything flaky.
+reset_flake
+run_seq "npm test" 0
+check_eq "a first-time pass is clean, not flaky" "clean" "$(field4)"
+
+# THE BUG. Same command, failed then passed, nothing else touched.
+reset_flake
+run_seq "npm test" 1
+run_seq "npm test" 0
+check_eq "fail then pass, same command, is FLAKY" "flaky" "$(field4)"
+
+# A failing run must leave the record behind, or the case above passes for the
+# wrong reason — a hook that flagged every second run would also satisfy it.
+reset_flake
+run_seq "npm test" 1
+check_eq "a failing run records the command" "1" \
+  "$(grep -c 'npm test' "$box/.claude/.failed-runs" 2>/dev/null || echo 0)"
+check_eq "and a failing run still leaves no stamp" "none" \
+  "$([[ -f "$box/.claude/.verified" ]] && echo STAMPED || echo none)"
+
+# THE KNOWN BYPASS, pinned rather than pretended away. Narrowing to the failing
+# test is correct debugging, not evasion, and it defeats this entirely.
+reset_flake
+run_seq "npm test" 1
+run_seq "npm test -- --grep auth" 0
+check_eq "NARROWING THE COMMAND IS A KNOWN BYPASS — clean, pinned not fixed" "clean" "$(field4)"
+
+# A different suite entirely is not this suite's flake.
+reset_flake
+run_seq "npm test" 1
+run_seq "pytest" 0
+check_eq "an unrelated command that passes is clean" "clean" "$(field4)"
+
+# A non-test command that fails must not fill the ledger with noise.
+reset_flake
+run_seq "echo hello" 1
+check_eq "a failing NON-test command records nothing" "absent" \
+  "$([[ -f "$box/.claude/.failed-runs" ]] && echo present || echo absent)"
+
+# Two failures then a pass is still one flake, not a duplicate.
+reset_flake
+run_seq "npm test" 1
+run_seq "npm test" 1
+run_seq "npm test" 0
+check_eq "two failures then a pass is still flaky" "flaky" "$(field4)"
+
+# VISIBLE NON-ENFORCEMENT. A missing ledger library must not stop the stamp: this
+# hook runs after the tool and cannot block anything, so failing closed here would
+# only strand commits. It says so instead.
+reset_flake
+out=$(python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":"npm test"},"tool_response":{"exitCode":0}}))' \
+      | ( cd "$box" && CLAUDE_PROJECT_DIR="$box" FLAKE_LIB=/nonexistent/nope.sh bash "$sut" 2>&1 >/dev/null ))
+check_eq "a missing flake library still stamps" "STAMPED" \
+  "$([[ -f "$box/.claude/.verified" ]] && echo STAMPED || echo none)"
+ran=$((ran+1))
+if printf '%s' "$out" | grep -qi "not enforcing"; then ok "and it announces that flake detection is NOT enforcing"
+else nope "and it announces that flake detection is NOT enforcing — got: $out"; fi
+
 printf '\n%d controls, %d failing\n' "$ran" "$failed"
 [[ "$failed" -eq 0 ]]
