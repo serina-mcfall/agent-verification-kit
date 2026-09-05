@@ -97,5 +97,58 @@ else
 fi
 echo
 
+# ---------------------------------------------------------------------------
+# A BLANK OR FALSE file_path MUST NOT MASK A POPULATED notebook_path — kit#2.
+#
+# The controls above send exactly one key, so the ORDER of the two in the jq
+# fall-through was never exercised. jq's `//` falls through on null and false
+# only; an empty string is TRUTHY, so a payload carrying both keys with a blank
+# first one returns "" and never reaches the notebook path. EDITED_FILE is then
+# empty, the hook takes its no-path branch, and stamp_path_for is called WITH
+# the cwd fallback — which is the ORIGINAL bug this whole file exists to close,
+# arriving through a different door.
+#
+# The symptom is the same pair as ever: the WRONG repository's stamp is cleared.
+# alpha (cwd, never edited) CLEARED, beta (edited) PRESENT.
+#
+# THE TWIN. Fixed in serina-learning by PR #143 on 2026-09-04 and not ported
+# here for a day. Same commit as guard-test-changes.sh's, which carried the
+# identical expression.
+# ---------------------------------------------------------------------------
+# run_raw_from_alpha <tool> <raw tool_input JSON>
+# `--arg` makes every value a string, so there is no way to send a JSON `false`
+# through run_from_alpha. That value is exactly what the regression guard needs.
+run_raw_from_alpha() {
+    jq -nc --arg t "$1" --argjson ti "$2" '{tool_name:$t, tool_input:$ti}' \
+        | ( cd "$box/alpha" && CLAUDE_PROJECT_DIR="$box" bash "$TRACKER" >/dev/null 2>&1 )
+}
+
+echo "4. a blank or false file_path must not mask notebook_path:"
+
+stamp_both
+run_raw_from_alpha NotebookEdit "$(jq -nc --arg p "$box/beta/tests/test_b.ipynb" '{file_path:"", notebook_path:$p}')"
+check "a BLANK file_path still clears BETA's stamp"        "cleared" "$(state "$box/beta")"
+check "a BLANK file_path leaves ALPHA's stamp alone"       "present" "$(state "$box/alpha")"
+
+# THE REGRESSION GUARD. An earlier fix elsewhere used
+# `map(select(. != null and . != "")) | .[0] // empty`, which broke this case:
+# `false` survives that select, lands in slot 0, and `.[0] // empty` re-applies
+# jq's truthiness — where false IS falsy — collapsing to empty. The OLD chain
+# handled it correctly. Green before the fix and must stay green after; it
+# exists to kill the naive fix, not the bug.
+stamp_both
+run_raw_from_alpha NotebookEdit "$(jq -nc --arg p "$box/beta/tests/test_b.ipynb" '{file_path:false, notebook_path:$p}')"
+check "a FALSE file_path still clears BETA's stamp"        "cleared" "$(state "$box/beta")"
+check "a FALSE file_path leaves ALPHA's stamp alone"       "present" "$(state "$box/alpha")"
+
+# Precedence is pinned: with both populated, file_path wins. Firing from alpha
+# with file_path naming a file in ALPHA makes that observable — beta must be
+# untouched, which only happens if file_path was actually read and preferred.
+stamp_both
+run_raw_from_alpha NotebookEdit "$(jq -nc --arg f "$box/alpha/tests/test_a.py" --arg n "$box/beta/tests/test_b.ipynb" '{file_path:$f, notebook_path:$n}')"
+check "with both populated, file_path wins — ALPHA is cleared" "cleared" "$(state "$box/alpha")"
+check "with both populated, BETA is left alone"                "present" "$(state "$box/beta")"
+echo
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
