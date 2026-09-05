@@ -19,3 +19,4 @@ test-guard-test-changes.sh
 test-check-test-changes.sh
 test-check-controls.sh
 test-flake-ledger.sh
+test-check-flaky-trailers.sh

@@ -68,3 +68,27 @@ jobs:
         run: |
           bash plugins/agent-verification-kit/hooks/check-test-changes.sh \
             "origin/${{ github.event.pull_request.base.ref }}"
+
+  flaky-trailers:
+    name: declared flakes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Same reason as the job above: a shallow clone yields an empty commit
+          # list, which looks exactly like a branch declaring no flakes.
+          fetch-depth: 0
+
+      # A SEPARATE JOB SO THE DECLARED FLAKES ARE VISIBLE IN THE CHECKS LIST,
+      # not buried in another job's log. The whole point of the trailer is that
+      # a second person sees it; folding this into the job above would satisfy
+      # the letter of that and none of it.
+      #
+      # This job CANNOT detect a MISSING trailer — by the time it runs, the stamp
+      # that knew a run was flaky is gone. verify-gate is the only place that can,
+      # and does. Read the header of the script before claiming otherwise.
+      - name: validate and report declared flakes
+        run: |
+          bash plugins/agent-verification-kit/hooks/check-flaky-trailers.sh \
+            "origin/${{ github.event.pull_request.base.ref }}"
