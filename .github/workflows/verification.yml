@@ -69,6 +69,30 @@ jobs:
           bash plugins/agent-verification-kit/hooks/check-test-changes.sh \
             "origin/${{ github.event.pull_request.base.ref }}"
 
+  plugin-version:
+    name: plugin version raised
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Same reason as every other diff-based job here: a shallow clone yields
+          # an empty file list, which looks exactly like a branch that changed no
+          # plugin files.
+          fetch-depth: 0
+
+      # INC-0019. Stages 2 and 3 both shipped under 0.1.0, and because the plugin
+      # cache is keyed by version, no existing installation ever received them —
+      # `/plugin install` said "already installed" and was telling the truth.
+      #
+      # A FRESH install would have got them, which is why a deliberate install
+      # probe in stage 2 looked conclusive and was not. This job exists because
+      # the failure is invisible to the person shipping.
+      - name: refuse installed changes without a version raise
+        run: |
+          bash plugins/agent-verification-kit/hooks/check-plugin-version.sh \
+            "origin/${{ github.event.pull_request.base.ref }}"
+
   flaky-trailers:
     name: declared flakes
     runs-on: ubuntu-latest
