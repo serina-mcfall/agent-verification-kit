@@ -1,0 +1,20 @@
+# The control suites in this kit, one per line.
+#
+# THE SINGLE COPY. check-controls.sh reads this, and .github/workflows/verification.yml
+# calls check-controls.sh — so CI and a local run can never disagree about which
+# suites exist. Two copies of this list previously lived in the workflow.
+#
+# Explicit rather than a glob, because a glob cannot tell you a suite has gone
+# MISSING. Both directions are enforced: an unlisted test-*.sh fails the run, and
+# a listed file that does not exist fails the run.
+test-stamp-path.sh
+test-verify-gate.sh
+test-verify-gate-portability.sh
+test-post-bash.sh
+test-edit-tracker.sh
+test-edit-tracker-notebook.sh
+test-check-models.sh
+test-classify-test-paths.sh
+test-guard-test-changes.sh
+test-check-test-changes.sh
+test-check-controls.sh
