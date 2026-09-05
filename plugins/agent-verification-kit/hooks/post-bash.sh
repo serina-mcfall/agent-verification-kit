@@ -46,6 +46,30 @@ else
 fi
 mkdir -p "$PROJECT_DIR/.claude"
 
+# --- Flake ledger: the memory that makes a RE-RUN distinguishable -------------
+#
+# Stage 3. A suite that failed and was re-run until it passed, with no code
+# change between, used to write an ordinary stamp and unlock a commit — measured
+# 2026-09-04, commit 9212df9. Stage 1 sees only the final pass and Stage 2 never
+# fires, because no test file was touched.
+#
+# SOFT, like the resolver above and for the same reason: this hook runs AFTER the
+# tool and cannot block anything. Failing closed here would strand commits
+# without preventing a single flake, so a missing library announces itself and
+# the stamp is written as before — visibly unenforced rather than silently so.
+FLAKE_LIB="${FLAKE_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/flake-ledger.sh}"
+FLAKE_OK=no
+if [ -r "$FLAKE_LIB" ]; then
+    # shellcheck source=/dev/null
+    . "$FLAKE_LIB" && FLAKE_OK=yes
+fi
+[ "$FLAKE_OK" = yes ] || echo "post-bash: flake ledger missing at $FLAKE_LIB — a re-run after a failure cannot be told from a first pass, so flake detection is NOT enforcing." >&2
+
+# The repository whose ledger is at stake is the one whose stamp is at stake, so
+# it is derived from VERIFIED rather than resolved a second time. Two resolutions
+# of the same question are two things that can disagree.
+FLAKE_REPO="${VERIFIED%/.claude/.verified}"
+
 # --- Verification stamp: detect test/build commands ---
 # Match common test and build commands.
 #
@@ -443,7 +467,22 @@ if echo "$COMMAND" | grep -qEi "$TEST_PATTERN"; then
         # failure direction and returns the gate to being satisfiable only by its
         # own escape hatch. That trade is recorded here so it can be revisited
         # deliberately rather than rediscovered.
-        echo "$(date +%s)|$(printf '%s' "$LAST_SEGMENT" | head -c 100)|$STAMP_BASIS" > "$VERIFIED"
+        # FOURTH FIELD: clean or flaky — Stage 3.
+        #
+        # `flaky` means this exact command failed within the ledger's window and
+        # no edit has happened since, so the pass is a re-run rather than a fix.
+        # verify-gate.sh refuses a flaky stamp unless the command is declared.
+        #
+        # The comparison is against LAST_SEGMENT, the same string the ledger was
+        # written with — NOT the truncated form recorded below. Truncation is for
+        # the stamp's readability; comparing a truncated command against a full
+        # one would silently miss every command over 100 characters, which is
+        # most real CI invocations.
+        STAMP_FLAKE=clean
+        if [ "$FLAKE_OK" = yes ] && flake_seen "$FLAKE_REPO" "$LAST_SEGMENT"; then
+            STAMP_FLAKE=flaky
+        fi
+        echo "$(date +%s)|$(printf '%s' "$LAST_SEGMENT" | head -c 100)|$STAMP_BASIS|$STAMP_FLAKE" > "$VERIFIED"
         if [ "$STAMP_BASIS" = inferred ]; then
             echo "VERIFICATION STAMP: Tests/build passed (exit code INFERRED — the payload carried none). Commit gate unlocked."
         else
@@ -454,6 +493,11 @@ if echo "$COMMAND" | grep -qEi "$TEST_PATTERN"; then
         # evidence of success, and treating it as success was the original fail-open:
         # `[ "$EXIT_CODE" = "unknown" ]` used to sit in the branch above.
         rm -f "$VERIFIED"
+        # REMEMBER THE FAILURE — Stage 3. Without this the next pass of the same
+        # command is indistinguishable from a first-time pass, which is the whole
+        # of run-until-green. Recorded here rather than anywhere earlier because
+        # this is the one branch that knows the run actually failed.
+        [ "$FLAKE_OK" = yes ] && flake_record "$FLAKE_REPO" "$LAST_SEGMENT"
         echo "VERIFICATION: Tests/build FAILED or unreadable (exit $EXIT_CODE). Stamp cleared. Fix issues before committing."
     fi
 fi
