@@ -292,18 +292,66 @@ echo
     ok "and it prints a declaration line naming the command"
   else nope "and it prints a declaration line naming the command — got: $(head -3 "$box/.f")"; fi
 
-  # Declared, with an issue: allowed, and it says which issue authorised it.
+  # Declared, with an issue, AND carrying the trailer: allowed, and it says which
+  # issue authorised it.
+  #
+  # THE TRAILER REQUIREMENT IS STEP 5, and these two controls changed with it.
+  # They previously used a bare `git commit -m x` and asserted the allow. That
+  # bare form is now REFUSED — see the control below — so they gain the trailer
+  # and keep asserting the same thing. The expectation moved because the
+  # behaviour moved, not because the assertion was softened.
+  DECL_OK='git commit -m x --trailer "Flaky: npm test #412 races on the token clock"'
   fresh_flake; put_stamp "npm test" flaky
   printf 'npm test :: #412 races on the token clock\n' > "$flakyf"
-  gate_in "$fr" 0 "a declared flaky command is allowed" "git commit -m x"
+  gate_in "$fr" 0 "a declared flaky command WITH the trailer is allowed" "$DECL_OK"
 
   fresh_flake; put_stamp "npm test" flaky
   printf 'npm test :: #412 races on the token clock\n' > "$flakyf"
-  printf '{"tool_input":{"command":"git commit -m x"}}' \
+  python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]}}))' "$DECL_OK" \
     | ( cd "$fr" && env CLAUDE_PROJECT_DIR="$box" bash "$sut" >"$box/.o" 2>&1 )
   ran=$((ran+1))
   if grep -q '#412' "$box/.o"; then ok "and the unlock names the issue that authorised it"
   else nope "and the unlock names the issue that authorised it — got: $(head -2 "$box/.o")"; fi
+
+  # ---------------------------------------------------------------------------
+  # THE TRAILER IS REQUIRED — Stage 3, step 5.
+  #
+  # The declaration file is gitignored and expires in thirty minutes. So a flake
+  # could be declared, committed and forgotten with NO TRACE A REVIEWER WILL EVER
+  # SEE — the gate made it deliberate but not visible, and "someone else sees it"
+  # is this kit's own stated criterion for a mechanism being worth anything.
+  #
+  # verify-gate is the only place that KNOWS the stamp is flaky, so it is the only
+  # place that can require the record. CI cannot: by then the stamp is gone.
+  # ---------------------------------------------------------------------------
+  fresh_flake; put_stamp "npm test" flaky
+  printf 'npm test :: #412 races on the token clock\n' > "$flakyf"
+  gate_in "$fr" 2 "a declared flake with NO trailer is refused" "git commit -m x"
+
+  fresh_flake; put_stamp "npm test" flaky
+  printf 'npm test :: #412 races on the token clock\n' > "$flakyf"
+  printf '{"tool_input":{"command":"git commit -m x"}}' \
+    | ( cd "$fr" && env CLAUDE_PROJECT_DIR="$box" bash "$sut" >/dev/null 2>"$box/.t" )
+  ran=$((ran+1))
+  if grep -q -- '--trailer' "$box/.t" && grep -q 'Flaky:' "$box/.t"; then
+    ok "and the refusal prints the --trailer form to add"
+  else nope "and the refusal prints the --trailer form to add — got: $(head -3 "$box/.t")"; fi
+
+  # A CLEAN commit must NOT be made to carry a trailer. If it were, the
+  # requirement would be noise on every commit and would be switched off.
+  fresh_flake; put_stamp "npm test" clean
+  gate_in "$fr" 0 "a CLEAN stamp needs no trailer" "git commit -m x"
+
+  # The trailer must be USED, not merely mentioned. `--trailer` is how git records
+  # one; a Flaky: line typed into the body sits above the sign-off paragraph and
+  # git parses ZERO trailers from it — the exact defect that cost three attempts
+  # on one commit in serina-learning, recorded in check-test-changes.sh.
+  fresh_flake; put_stamp "npm test" flaky
+  printf 'npm test :: #412 races on the token clock\n' > "$flakyf"
+  gate_in "$fr" 2 "a Flaky: line in the message BODY is not a trailer" \
+    'git commit -m "x
+
+Flaky: npm test #412"'
 
   # AN ISSUE NUMBER IS REQUIRED. Without it the declaration is 'flaky, will look
   # later', and the risk this mechanism exists to mitigate is a genuine bug
@@ -341,7 +389,7 @@ echo
   # Comments and blanks are ignored rather than parsed as commands.
   fresh_flake; put_stamp "npm test" flaky
   printf '# npm test :: #412 commented out\n\nnpm test :: #412 really declared\n' > "$flakyf"
-  gate_in "$fr" 0 "a commented-out line does not authorise, but a real one below it does" "git commit -m x"
+  gate_in "$fr" 0 "a commented-out line does not authorise, but a real one below it does" "$DECL_OK"
 
   # A COMMAND LONGER THAN THE STAMP'S 100-CHARACTER FIELD. The stamp truncates
   # for readability, and verify-gate only has the stamp — so the declaration must
@@ -353,7 +401,8 @@ echo
   trunc="$(printf '%s' "$long" | head -c 100)"
   fresh_flake; put_stamp "$trunc" flaky
   printf '%s :: #500 long invocation\n' "$trunc" > "$flakyf"
-  gate_in "$fr" 0 "a >100-character command is declarable via the truncated form the stamp records" "git commit -m x"
+  gate_in "$fr" 0 "a >100-character command is declarable via the truncated form the stamp records" \
+    "git commit -m x --trailer \"Flaky: $trunc #500 long invocation\""
 
 if [ "$failed" -eq 0 ]; then
   echo "$ran controls, 0 failing"

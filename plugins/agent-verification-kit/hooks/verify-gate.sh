@@ -469,8 +469,56 @@ if [ "$STAMP_FLAKE" = flaky ]; then
         exit 2
     fi
 
+    # -----------------------------------------------------------------------
+    # THE DECLARATION IS NOT ENOUGH — IT HAS TO REACH THE RECORD.
+    #
+    # .claude/.flaky is gitignored and expires in thirty minutes. A flake could
+    # be declared, committed and forgotten with NO TRACE A REVIEWER WILL EVER
+    # SEE. The gate would have made it deliberate without making it visible, and
+    # "someone else sees it" is this kit's own criterion for whether a mechanism
+    # buys anything at all — the same reasoning that makes Stage 2's commit
+    # trailer the half with teeth rather than its hook.
+    #
+    # This hook is the ONLY place that can require the record, because it is the
+    # only place that knows the stamp is flaky. By the time CI runs, the stamp is
+    # gone. CI's job is to validate the trailers it finds, not to notice a
+    # missing one.
+    #
+    # `--trailer` SPECIFICALLY, not merely the word Flaky:. Git parses trailers
+    # only from the FINAL paragraph, so a `Flaky:` line typed into the message
+    # body above a Signed-off-by records ZERO trailers while looking perfect in
+    # `git log`. That cost three attempts on one commit in serina-learning and is
+    # documented at length in check-test-changes.sh. Requiring the flag is what
+    # makes the difference checkable from here.
+    #
+    # STATED LIMIT: this reads the command string, so `--trailer "Other: x"`
+    # alongside a `Flaky:` elsewhere would satisfy the pattern only if the flag
+    # itself carries Flaky:, which the regex requires. It cannot verify what git
+    # ultimately parsed — that is the CI half's job, and the two are complementary
+    # for the same reason Stage 2's are.
+    # -----------------------------------------------------------------------
+    if ! printf '%s' "$COMMAND" | grep -qE -- '--trailer[[:space:]=]+["'"'"']?Flaky:'; then
+        {
+            echo "COMMIT BLOCKED — this flake is declared locally but would leave no trace in the record."
+            echo
+            echo "  command:  $STAMP_CMD"
+            echo "  declared: $FLAKY_AUTH"
+            echo
+            echo "$FLAKY_DECL is gitignored and expires after 30 minutes, so a reviewer"
+            echo "would never see that this commit's suite passed only on a re-run. Put it in the"
+            echo "commit, where it survives and where a pull request shows it:"
+            echo
+            echo "  --trailer \"Flaky: $STAMP_CMD $FLAKY_AUTH\""
+            echo
+            echo "Use --trailer, never a line typed into the message body. Git parses trailers only"
+            echo "from the final paragraph, so a Flaky: line above a Signed-off-by records as ZERO"
+            echo "trailers while looking perfect in git log."
+        } >&2
+        exit 2
+    fi
+
     # SAY WHAT AUTHORISED IT, at the moment it is relied upon.
-    echo "Verified $(( STAMP_AGE / 60 ))m ago, but FLAKY — '$STAMP_CMD' failed before it passed. Declared: $FLAKY_AUTH. Commit allowed."
+    echo "Verified $(( STAMP_AGE / 60 ))m ago, but FLAKY — '$STAMP_CMD' failed before it passed. Declared: $FLAKY_AUTH, and recorded in the commit. Commit allowed."
     exit 0
 fi
 
