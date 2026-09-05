@@ -89,7 +89,46 @@ TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')
 #
 # `file_path` is tried first because three of the four tools use it; the fallback
 # costs nothing when it is present.
-TARGET=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
+#
+# ---------------------------------------------------------------------------
+# WHY THIS IS NOT `a // b // empty`, WHICH IS WHAT IT USED TO BE — kit#2.
+#
+# jq's `//` falls through on null and false ONLY. An empty string is TRUTHY in
+# jq, so `.tool_input.file_path // .tool_input.notebook_path` returns "" for
+# {"file_path":"","notebook_path":"tests/x.ipynb"} and NEVER REACHES the
+# notebook path. TARGET is then empty, the `[ -z "$TARGET" ]` branch below
+# reports that the call "carried neither" key — which is false, one was
+# present — and the edit is ALLOWED.
+#
+# That is a fail-open in the one place this guard exists to hold, and the
+# message actively misdirects whoever reads it.
+#
+# The select keeps jq's OWN fall-through set — null and false — and adds the
+# empty string to it. So this is `//` with one extra falsy value, not a new
+# policy. `. != false` is NOT decoration: an earlier fix elsewhere omitted it
+# and regressed a case the old chain got right, because `false` survives a
+# `!= null and != ""` select, lands in slot 0, and `.[0] // empty` then
+# re-applies jq's truthiness and collapses the pipeline to empty. Control 13b
+# holds that line and is green both before and after this change.
+#
+# THE TWIN. The identical defect was fixed in edit-tracker.sh's ancestor by
+# serina-learning PR #143 on 2026-09-04 and was NOT ported to this plugin —
+# including to this repository's own copy of edit-tracker.sh, which carried it
+# for a further day. That is the pattern the README calls its most recurrent:
+# a fix applied where the defect was reported and not to its twin. Both twins
+# are corrected in the same commit as this one. If a third appears, grep the
+# whole hook layer for `//` before calling it done; the other seven sites were
+# checked and are safe, because their falsy values are unreachable or benign.
+#
+# NOT a live break: Claude Code's own NotebookEdit does not send a blank
+# file_path — verified 2026-09-04 by observing a real NotebookEdit call resolve
+# correctly through this very expression. This is hardening for a future or
+# third-party payload producer, which matters because this ships as a plugin
+# other people install.
+#
+# Controls 13, 13b, 13c, 13d and 13e cover it. 13 was verified RED first.
+# ---------------------------------------------------------------------------
+TARGET=$(printf '%s' "$INPUT" | jq -r '[.tool_input.file_path, .tool_input.notebook_path] | map(select(. != null and . != false and . != "")) | .[0] // empty')
 
 case "$TOOL" in
     Edit|Write|MultiEdit|NotebookEdit) ;;

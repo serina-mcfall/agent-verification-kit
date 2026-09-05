@@ -58,7 +58,36 @@ COUNTER="$PROJECT_DIR/.claude/.edit-count"
 # only for the three tools that put it under file_path.
 #
 # Covered by test-edit-tracker-notebook.sh, confirmed red before this line changed.
-EDITED_FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
+#
+# ---------------------------------------------------------------------------
+# AND WHY IT IS NOT `a // b // empty` EITHER — kit#2, 2026-09-05.
+#
+# Reading the right key is not enough if the wrong one can still shadow it.
+# jq's `//` falls through on null and false ONLY; an empty string is TRUTHY, so
+# {"file_path":"","notebook_path":"beta/x.ipynb"} yields "" and never reaches
+# the notebook path. EDITED_FILE is empty, the else branch below calls
+# stamp_path_for WITH the cwd fallback, and the WRONG repository is cleared —
+# the same alpha-CLEARED / beta-PRESENT pair this file already documents twice,
+# arriving through a third door.
+#
+# The select keeps jq's own fall-through set (null, false) and adds the empty
+# string. `. != false` is load-bearing, not tidiness: the first version of this
+# fix, written in serina-learning, omitted it and REGRESSED a case the old chain
+# got right — `false` survives a `!= null and != ""` select, lands in slot 0,
+# and `.[0] // empty` re-applies jq's truthiness and collapses to empty. That
+# was caught by an adversarial review, and the regression guard for it is in
+# test-edit-tracker-notebook.sh, green both before and after this change.
+#
+# THE TWIN, AND WHY IT WAS LATE. serina-learning PR #143 fixed this on
+# 2026-09-04. This plugin's copy was NOT updated in that change, so the public,
+# installable copy carried the defect for a further day while two other copies
+# of the same file did not. guard-test-changes.sh carried the identical
+# expression and is fixed in the same commit as this one. The other seven `//`
+# sites in this hook layer were checked and are safe — their falsy values are
+# either unreachable or benign, and `exitCode: 0` is truthy in jq, so the
+# post-bash chain is correct as written.
+# ---------------------------------------------------------------------------
+EDITED_FILE=$(echo "$INPUT" | jq -r '[.tool_input.file_path, .tool_input.notebook_path] | map(select(. != null and . != false and . != "")) | .[0] // empty')
 STAMP_LIB="${STAMP_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/stamp-path.sh}"
 if [ -r "$STAMP_LIB" ]; then
     # shellcheck source=/dev/null

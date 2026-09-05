@@ -27,8 +27,23 @@ echo "def test_b(): assert 1" > "$REPO/tests/test_b.py"
 echo "print(1)"               > "$REPO/src/main.py"
 echo "export default {}"      > "$REPO/playwright.config.ts"
 
+echo "{}"                     > "$REPO/tests/test_n.ipynb"
+
 payload() {
     jq -nc --arg t "$1" --arg p "$2" '{tool_name:$t, tool_input:{file_path:$p}}'
+}
+
+# payload_raw <tool> <raw tool_input JSON> — for values a --arg cannot express.
+# `--arg` makes everything a string, so there is no way to send a JSON `false`
+# through the helper above, and `false` is exactly the value section 13 needs.
+payload_raw() {
+    jq -nc --arg t "$1" --argjson ti "$2" '{tool_name:$t, tool_input:$ti}'
+}
+
+# run_raw <tool> <raw tool_input JSON> -> sets RC and OUT, as `run` does.
+run_raw() {
+    OUT=$(payload_raw "$1" "$2" | ( cd "$REPO" && CLAUDE_PROJECT_DIR="$REPO" bash "$GUARD" 2>&1 ))
+    RC=$?
 }
 
 # run <tool> <path> -> sets RC and OUT
@@ -273,6 +288,68 @@ check_rc "declaring just the first word does not authorise the whole path" 2
 decl 'my tests/  the directory, not the file'
 run Edit "$REPO/my tests/test_a.py"
 check_rc "declaring the directory prefix does not authorise the file" 2
+echo
+
+# ---------------------------------------------------------------------------
+# 13. A BLANK OR FALSE file_path MUST NOT MASK A POPULATED notebook_path.
+#
+#     jq's `//` falls through on null and false ONLY. An empty string is TRUTHY
+#     in jq, so `.tool_input.file_path // .tool_input.notebook_path` returns ""
+#     for a payload carrying both keys with a blank first one, and the notebook
+#     path is never reached. TARGET is then empty, the hook takes its
+#     "carried neither key" branch, and the edit is ALLOWED — a fail-open in the
+#     one place this guard exists to hold.
+#
+#     kit#2. The identical defect was fixed in edit-tracker.sh's ancestor by
+#     serina-learning PR #143 and NOT ported here, which is this repository's own
+#     most-recorded pattern: a fix applied where the defect was reported and not
+#     to its twin. Both twins are fixed in the same commit as this control lands.
+#
+#     Not reachable from Claude Code's own NotebookEdit — a real call was observed
+#     resolving correctly through this very expression on 2026-09-04. This is
+#     hardening against a future or third-party payload producer, which matters
+#     because this ships as a plugin other people install.
+# ---------------------------------------------------------------------------
+echo "13. a blank or false file_path must not mask notebook_path:"
+
+run_raw NotebookEdit "$(jq -nc --arg n "$REPO/tests/test_n.ipynb" '{file_path:"", notebook_path:$n}')"
+check_rc "a BLANK file_path does not mask a populated notebook_path" 2
+
+# 13b. THE REGRESSION GUARD, and it is not decoration.
+#
+#      The first attempt at this fix elsewhere used
+#      `map(select(. != null and . != "")) | .[0] // empty`, which REGRESSED a
+#      case the old `//` chain got right: `false` survives that select, lands in
+#      slot 0, and `.[0] // empty` then re-applies jq's truthiness — where false
+#      IS falsy — collapsing the pipeline to empty. The old expression returned
+#      the notebook path correctly. So this control is GREEN before the fix and
+#      must STAY green after it; it exists to kill the naive fix, not the bug.
+run_raw NotebookEdit "$(jq -nc --arg n "$REPO/tests/test_n.ipynb" '{file_path:false, notebook_path:$n}')"
+check_rc "a FALSE file_path does not mask a populated notebook_path" 2
+
+# 13c. Precedence is pinned. With both keys populated and pointing at different
+#      files, file_path wins — the documented choice, because three of the four
+#      wired tools use it. Both paths here are test files, so the guard blocks
+#      either way; the assertion is on WHICH path the refusal names.
+run_raw NotebookEdit "$(jq -nc --arg f "$REPO/tests/test_a.py" --arg n "$REPO/tests/test_n.ipynb" '{file_path:$f, notebook_path:$n}')"
+check_rc "with both keys populated the call is still refused" 2
+if printf '%s' "$OUT" | grep -q "tests/test_a.py"; then
+    echo "ok    and the refusal names file_path's target, not notebook_path's"; pass=$((pass + 1))
+else
+    echo "FAIL  and the refusal names file_path's target, not notebook_path's"
+    printf '        %s\n' "$(printf '%s' "$OUT" | head -2)"; fail=$((fail + 1))
+fi
+
+# 13d. BOTH BLANK must still stand aside, or 13 could be satisfied by a change
+#      that made every empty payload resolve to something — trading a masked
+#      notebook path for a confidently wrong one.
+run_raw NotebookEdit '{"file_path":"", "notebook_path":""}'
+check_rc "both keys blank still stands aside rather than guessing" 0
+
+# 13e. Non-vacuity for this section: a non-test path with the same shape must
+#      still be allowed, or 13 would pass under a guard that blocks everything.
+run_raw NotebookEdit "$(jq -nc --arg n "$REPO/src/main.py" '{file_path:"", notebook_path:$n}')"
+check_rc "a blank file_path with a NON-test notebook_path is still allowed" 0
 echo
 
 echo "$pass passed, $fail failed"
