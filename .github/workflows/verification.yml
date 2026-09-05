@@ -50,6 +50,18 @@ jobs:
       - name: controls
         run: bash plugins/agent-verification-kit/hooks/check-controls.sh
 
+      # THE RECORD MUST PARSE. This step is in the `controls` job rather than a
+      # pull_request-only one deliberately: that job runs on PUSH TO MAIN as well,
+      # and main is where the corruption actually landed.
+      #
+      # On 2026-09-06 three conflict-marker lines were merged into events.jsonl.
+      # Every job above ran green over a file that does not parse, because not one
+      # of them looked at it. The record is the only artefact this programme
+      # reasons from — every verdict, every open incident, every trend — and it
+      # was the one thing with no check on it.
+      - name: the event record parses
+        run: bash plugins/agent-verification-kit/hooks/check-record.sh
+
   undeclared-test-changes:
     name: undeclared test changes
     runs-on: ubuntu-latest
