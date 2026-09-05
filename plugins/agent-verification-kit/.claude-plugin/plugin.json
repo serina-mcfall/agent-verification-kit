@@ -1,6 +1,6 @@
 {
   "name": "agent-verification-kit",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Evidence-required completion for agentic coding, enforced by hooks rather than by instructions. Blocks a commit unless a fresh verification stamp exists; the stamp is earned only by a passing test or build command, scoped to the repository being committed to, expiring after 30 minutes, and cleared by any file edit. Refuses to modify an existing test or test config without a declaration naming the path. Marks a suite that passed only on a re-run as flaky, and refuses that commit unless the flake is declared and carried in a Flaky: trailer. Also refuses a commit whose agent definitions name a model that does not resolve. Governs this harness only, and can be walked around by narrowing the test command — see README for what that does and does not cover.",
   "author": {
     "name": "Serina Mcfall",
