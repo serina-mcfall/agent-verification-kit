@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "agent-verification-kit",
-      "description": "Evidence-required completion, enforced outside the agent's own judgement rather than by instructing it. A commit is blocked unless a fresh verification stamp exists; the stamp is written only by a passing test or build command, is scoped to the repository being committed to, expires after 30 minutes, and is cleared by any file edit. Also validates that every agent definition in a commit names a model that actually resolves, because a typo'd model: does not fail at runtime — it 404s, retries, and silently falls back to the dispatching session's model.",
+      "description": "Evidence-required completion, enforced outside the agent's own judgement rather than by instructing it. A commit is blocked unless a fresh verification stamp exists; the stamp is written only by a passing test or build command, is scoped to the repository being committed to, expires after 30 minutes, and is cleared by any file edit. Modifying an existing test or test config requires a declaration naming that path, so weakening a suite is deliberate rather than silent. A suite that passed only on a re-run is stamped flaky rather than clean, and that commit is refused unless the flake is declared with an issue and carried in a Flaky: trailer where a reviewer will see it. Also validates that every agent definition in a commit names a model that actually resolves, because a typo'd model: does not fail at runtime — it 404s, retries, and silently falls back to the dispatching session's model. Governs Claude Code only; it is accident prevention inside one harness, not a security boundary.",
       "source": "./plugins/agent-verification-kit",
       "category": "development"
     }

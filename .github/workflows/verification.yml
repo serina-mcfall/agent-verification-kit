@@ -50,6 +50,18 @@ jobs:
       - name: controls
         run: bash plugins/agent-verification-kit/hooks/check-controls.sh
 
+      # THE RECORD MUST PARSE. This step is in the `controls` job rather than a
+      # pull_request-only one deliberately: that job runs on PUSH TO MAIN as well,
+      # and main is where the corruption actually landed.
+      #
+      # On 2026-09-06 three conflict-marker lines were merged into events.jsonl.
+      # Every job above ran green over a file that does not parse, because not one
+      # of them looked at it. The record is the only artefact this programme
+      # reasons from — every verdict, every open incident, every trend — and it
+      # was the one thing with no check on it.
+      - name: the event record parses
+        run: bash plugins/agent-verification-kit/hooks/check-record.sh
+
   undeclared-test-changes:
     name: undeclared test changes
     runs-on: ubuntu-latest
@@ -67,6 +79,30 @@ jobs:
       - name: refuse undeclared test changes
         run: |
           bash plugins/agent-verification-kit/hooks/check-test-changes.sh \
+            "origin/${{ github.event.pull_request.base.ref }}"
+
+  plugin-version:
+    name: plugin version raised
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Same reason as every other diff-based job here: a shallow clone yields
+          # an empty file list, which looks exactly like a branch that changed no
+          # plugin files.
+          fetch-depth: 0
+
+      # INC-0019. Stages 2 and 3 both shipped under 0.1.0, and because the plugin
+      # cache is keyed by version, no existing installation ever received them —
+      # `/plugin install` said "already installed" and was telling the truth.
+      #
+      # A FRESH install would have got them, which is why a deliberate install
+      # probe in stage 2 looked conclusive and was not. This job exists because
+      # the failure is invisible to the person shipping.
+      - name: refuse installed changes without a version raise
+        run: |
+          bash plugins/agent-verification-kit/hooks/check-plugin-version.sh \
             "origin/${{ github.event.pull_request.base.ref }}"
 
   flaky-trailers:

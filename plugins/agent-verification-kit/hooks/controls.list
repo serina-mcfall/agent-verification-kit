@@ -20,3 +20,5 @@ test-check-test-changes.sh
 test-check-controls.sh
 test-flake-ledger.sh
 test-check-flaky-trailers.sh
+test-check-plugin-version.sh
+test-check-record.sh
