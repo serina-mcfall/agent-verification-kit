@@ -79,9 +79,40 @@ that route cost one explicit line, naming one exact path, is most of the defence
 and visible in the pull request. It too can be written by an agent. What it buys is that **someone
 else sees it**. Prevention is a required status check plus a human, and that needs repo admin.
 
-### Two of these limits were found the hard way
+### Flake triage can be walked around by narrowing the command
 
-They are not hypotheticals. See *What the comments are for* below.
+`post-bash.sh` remembers a test command that **failed**, so a later pass of *the same command* is
+stamped `flaky` rather than `clean`, and the gate makes you declare it. The ledger keys on the
+**exact command string**, and that is the bypass:
+
+```
+npm test                  → fails.  Recorded.
+npm test                  → passes. Stamp says FLAKY. Commit refused.
+
+npm test                  → fails.  Recorded.
+npm test -- --grep auth   → passes. No ledger entry for THIS string.
+                                    Stamp says clean. Commit ALLOWED.
+```
+
+An agent does not need to know this mechanism exists to defeat it. **Narrowing the command after a
+broad failure is ordinary debugging**, which is exactly what makes it an effective bypass.
+
+It matches exactly, and does not prefix-match the way the test guard matches paths, because
+`npm test` is a strict prefix of `npm test -- --grep auth` — so prefix matching would mark a
+*narrower, different* run flaky. **That is a false positive, and a gate that cries wolf gets switched
+off**, which would cost more than the bypass does. Normalising the command instead means guessing
+which flags change the test set (`--grep auth` does; `--reporter json` does not), and being wrong in
+either direction reintroduces one of the two problems.
+
+So: **this raises the cost of laundering a red suite. It does not prevent it.** What it buys is that
+re-running until green stops being free and silent — narrowing is at least a visible act in the
+transcript.
+
+### Several of these limits were found the hard way
+
+They are not hypotheticals. See *What the comments are for* below. (No count here on purpose: a
+number in prose that nothing updates is a stale claim printed with authority, which is a defect this
+kit has already shipped once and now watches for.)
 
 ---
 
@@ -119,34 +150,45 @@ result is duplicate stderr, not a conflict. Remove your global wiring once you t
 
 ## How it works
 
-Four scripts share one protocol. None of them is useful alone.
+These scripts share one protocol. None of them is useful alone.
 
 ```mermaid
 flowchart LR
-    E["Agent edits a file"] -->|"PostToolUse: Edit|Write"| ET["edit-tracker.sh<br/>CLEARS the stamp"]
-    T["Agent runs the tests"] -->|"PostToolUse: Bash"| PB["post-bash.sh<br/>WRITES the stamp<br/>records command + basis"]
-    C["Agent runs git commit"] -->|"PreToolUse: Bash"| VG["verify-gate.sh<br/>READS the stamp<br/>blocks if absent or stale"]
+    E["Agent edits a file"] -->|"PostToolUse: Edit|Write"| ET["edit-tracker.sh<br/>CLEARS the stamp<br/>and the ledger"]
+    T["Agent runs the tests"] -->|"PostToolUse: Bash"| PB["post-bash.sh<br/>WRITES the stamp<br/>command + basis + flaky"]
+    C["Agent runs git commit"] -->|"PreToolUse: Bash"| VG["verify-gate.sh<br/>READS the stamp<br/>blocks if absent, stale<br/>or undeclared-flaky"]
 
     ET --> S[("&lt;repo&gt;/.claude/.verified<br/>30-minute TTL")]
     PB --> S
     S --> VG
 
+    PB --> L[("&lt;repo&gt;/.claude/.failed-runs<br/>commands that FAILED")]
+    L --> PB
+    ET --> L
+
     SP["stamp-path.sh<br/>resolves WHICH repo's stamp"] -.-> ET
     SP -.-> PB
     SP -.-> VG
 
+    FL["flake-ledger.sh<br/>records and reads failures"] -.-> PB
+    FL -.-> ET
+
     style S fill:#f6efe0,stroke:#8a6d3a
+    style L fill:#f6efe0,stroke:#8a6d3a
     style VG fill:#f6e6e6,stroke:#8a3a3a
     style SP fill:#e8eef6,stroke:#3a5f8a
+    style FL fill:#e8eef6,stroke:#3a5f8a
 ```
 
 | Script | Event | Job |
 |---|---|---|
-| `post-bash.sh` | `PostToolUse` · `Bash` | Writes the stamp when a test or build command passes. Records the command and whether the exit code was observed or inferred. |
-| `edit-tracker.sh` | `PostToolUse` · `Edit\|Write\|MultiEdit\|NotebookEdit` | Clears the stamp of **the edited file's** repository. Nudges every 5 edits. |
-| `verify-gate.sh` | `PreToolUse` · `Bash` | Blocks `git commit` with no fresh stamp. Also blocks a commit whose agent definitions name an unresolvable model. |
+| `post-bash.sh` | `PostToolUse` · `Bash` | Writes the stamp when a test or build command passes. Records the command, whether the exit code was observed or inferred, and whether that command had **failed earlier**. Records failures to the ledger. |
+| `edit-tracker.sh` | `PostToolUse` · `Edit\|Write\|MultiEdit\|NotebookEdit` | Clears the stamp **and the flake ledger** of the edited file's repository — an edit means the next run tests something different. Nudges every 5 edits. |
+| `verify-gate.sh` | `PreToolUse` · `Bash` | Blocks `git commit` with no fresh stamp, and blocks a **flaky** stamp unless the flake is both declared and carried in the commit. Also blocks a commit whose agent definitions name an unresolvable model. |
 | `stamp-path.sh` | *sourced library* | Decides which repository's stamp is at stake. Not a hook. |
+| `flake-ledger.sh` | *sourced library* | Remembers which commands failed, so a re-run pass is distinguishable from a first pass. Not a hook. |
 | `check-models.sh` | *invoked by verify-gate* | Static check that every `model:` in an agent definition resolves. |
+| `check-flaky-trailers.sh` | *invoked by your CI* | Validates every `Flaky:` trailer on a branch and prints them. Not a hook. |
 
 **Why the stamp is repository-scoped and not session-scoped.** If your session root contains several
 repositories, one shared stamp fails in both directions at once: `npm test` in one project unlocks a
@@ -238,7 +280,7 @@ prefix matching, so a bare filename matches nothing.
 ```
 
 This repository runs it on itself — see [`.github/workflows/verification.yml`](.github/workflows/verification.yml),
-which also runs all 409 controls on every push.
+which also runs every control suite on every push.
 
 `fetch-depth: 0` is not optional. On a shallow clone the base ref does not resolve, and the script
 **exits 3** rather than reporting a clean run — every failure mode of a diff-based checker produces
@@ -269,9 +311,73 @@ are **not** in force. It never fails silently into defaults.
 
 ---
 
+## Flake triage
+
+A stamp earned on the second try is not the same as a stamp earned on the first, and until Stage 3
+the protocol could not tell them apart. Re-running until green was the cheapest route to a commit.
+
+**An honest fix costs nothing.** If you edit a file between the failure and the pass, the ledger is
+cleared and the stamp reads `clean` — no declaration, no trailer, no message. A mechanism that taxed
+ordinary debugging would be switched off, so it doesn't.
+
+| What you did | Stamp | Commit |
+|---|---|---|
+| suite passed first time | `clean` | allowed, silently |
+| suite failed → **you edited something** → passed | `clean` | allowed, silently |
+| suite failed → re-ran it → passed | **`flaky`** | **refused** |
+| …and you declared it | `flaky` | **still refused** — see below |
+| …and the commit carries a `Flaky:` trailer | `flaky` | allowed, and the gate names the issue |
+
+### Declaring a known flake
+
+Two steps, deliberately. Local declaration in `<repo>/.claude/.flaky`, one per line:
+
+```
+<exact command> :: #<issue> <reason>
+```
+
+```
+npm test :: #412 races on the token clock
+```
+
+The `#<issue>` is required. **A flake with no issue is a flake nobody has agreed to fix**, which is
+the state this exists to make hard to reach quietly.
+
+That alone still refuses the commit, because `.claude/.flaky` is gitignored and the stamp expires
+after thirty minutes — so a flake could be declared, committed and forgotten with **nothing a
+reviewer would ever see**. "Someone else sees it" is this kit's criterion for whether a mechanism
+buys anything. So the commit must carry it too:
+
+```bash
+git commit -m "..." --trailer "Flaky: npm test #412 races on the token clock"
+```
+
+**`--trailer`, not a line typed into the message.** Git parses trailers only from the *final
+paragraph*, so a `Flaky:` line with any paragraph after it records **zero** trailers while looking
+perfect in `git log`. Both halves refuse that case rather than silently reading it as clean.
+
+### The CI half, and what it cannot do
+
+```yaml
+- name: validate and report declared flakes
+  run: bash plugins/agent-verification-kit/hooks/check-flaky-trailers.sh "origin/${{ github.event.pull_request.base.ref }}"
+```
+
+It validates every `Flaky:` trailer on the branch and prints them, so declared flakes are visible in
+their own check rather than buried. Exit `0` clean, `1` malformed, `3` could-not-check.
+
+**It cannot detect a *missing* trailer, and never will.** By the time CI runs, the stamp that knew
+the run was flaky is gone — nothing in the repository records that a commit was made under one. Only
+the hook can require it, at the moment the stamp still exists, and it does.
+
+This is weaker than the test guard's CI half, which *can* catch an undeclared change because the
+change is sitting in the diff. The two are not equivalent and this file will not imply they are.
+
+---
+
 ## What the comments are for
 
-`verify-gate.sh` is 380 lines, of which roughly 120 are logic. The rest is a written record of
+`verify-gate.sh` is mostly comment, not logic. The rest is a written record of
 bypasses that were found and closed. That commentary is the most valuable thing in this repository,
 and it is the reason the kit exists in this shape rather than as a tidy rewrite.
 
@@ -295,20 +401,23 @@ shape before calling it done.
 Every script ships with its own controls, in the same directory.
 
 ```bash
-cd plugins/agent-verification-kit/hooks
-bash test-stamp-path.sh                #  25 controls
-bash test-verify-gate.sh               #  20
-bash test-verify-gate-portability.sh   #   6
-bash test-post-bash.sh                 # 148
-bash test-edit-tracker.sh              #  12
-bash test-edit-tracker-notebook.sh     #   5
-bash test-check-models.sh              #  16
-bash test-classify-test-paths.sh             #  68
-bash test-guard-test-changes.sh                #  46
-bash test-check-test-changes.sh        #  63
+bash plugins/agent-verification-kit/hooks/check-controls.sh
 ```
 
-**409 controls**, and they run on every push — see the badge-less truth in
+That runs every suite and reports its own totals. **There is no count written here on purpose.**
+
+This block used to list each suite with its control count beside it, and by the time anyone read it
+the numbers were wrong — one suite had grown from 5 controls to 12, another from 46 to 52, and three
+suites had been added that the list did not mention. A hand-maintained copy of a list that already
+exists somewhere else drifts, silently, and then gets quoted. That is the same defect as the CI job
+once named `controls (357)` while 362 existed, and the same defect as the workflow that carried the
+suite list twice.
+
+The single copy lives in `controls.list`, and `check-controls.sh` enforces it **in both directions**:
+an unlisted `test-*.sh` fails the run, and a listed file that is missing fails the run. It refuses to
+run a subset — a partial green is a wrong claim, an error is a correct one.
+
+They run on every push — see the badge-less truth in
 [Actions](https://github.com/serina-mcfall/agent-verification-kit/actions).
 
 ### Naming, and why it is load-bearing
@@ -322,6 +431,9 @@ what they do:
 | `check-test-changes.sh` | `test-check-test-changes.sh` |
 | `classify-test-paths.sh` | `test-classify-test-paths.sh` |
 | `verify-gate.sh` | `test-verify-gate.sh` |
+| `flake-ledger.sh` | `test-flake-ledger.sh` |
+| `check-flaky-trailers.sh` | `test-check-flaky-trailers.sh` |
+| `check-controls.sh` | `test-check-controls.sh` |
 
 That invariant was **not** true until 2026-09-04. The hook and the classifier were called
 `test-guard.sh` and `test-patterns.sh`, which meant a `test-*.sh` glob ran them as suites — they
@@ -333,10 +445,13 @@ was the tell.
 `guard-test-changes.sh` now also pairs with `check-test-changes.sh` by name, which is what the two
 halves of the guard actually are: one guards before the write, the other checks after the commit.
 
-The workflow keeps an **explicit** list of suites and fails if any `test-*.sh` file is missing from
-it, or listed but absent. Explicit rather than a glob because a glob cannot tell you a suite has
-gone *missing* — and this list had already gone stale once: `test-edit-tracker-notebook.sh` was
-written, committed, and left out of CI for a commit. Every suite opens with a vacuity guard — a control asserting that ordinary,
+`controls.list` keeps an **explicit** list of suites and `check-controls.sh` fails if any `test-*.sh`
+file is missing from it, or listed but absent. Explicit rather than a glob because a glob cannot tell
+you a suite has gone *missing* — and this list had already gone stale once: `test-edit-tracker-notebook.sh`
+was written, committed, and left out of CI for a commit. It went stale a second time, on
+2026-09-06, when `test-check-flaky-trailers.sh` was committed before its implementation existed —
+the runner refused to run **anything** rather than run twelve suites and report green, which is the
+behaviour that makes the list worth keeping. Every suite opens with a vacuity guard — a control asserting that ordinary,
 innocent input is *not* flagged — because a classifier that says "test" to everything and a guard
 that blocks everything would both pass a coverage count and be useless.
 
@@ -355,7 +470,7 @@ Staged, one mechanism per stage, each proven before the next.
 |---|---|---|
 | 1 | Evidence-required completion — the stamp protocol above | **shipped** |
 | 2 | Test-modification guard — hook + CI twin | **shipped** |
-| 3 | `flake-triage` — flaky reported as its own state, never silently retried | planned |
+| 3 | `flake-triage` — a re-run pass is a distinct state from a first pass | **shipped**, with a stated bypass |
 | 4 | `mutation-gate` — diff-scoped, advisory | planned |
 | 5 | `severity-floor` — trivia fixed in place, never failing a gate | planned |
 
@@ -369,7 +484,10 @@ Each stage exists to cover the previous one's stated blind spot:
   layer that measures whether the assertions still bite — and it will ship advisory, so this is a
   **real remaining gap, not a covered one**.
 - **Stage 3 exists because none of the above distinguishes flaky from failed**, and an agent's
-  documented response to a flake is to add retries until it stops.
+  documented response to a flake is to add retries until it stops. It shipped 2026-09-06.
+- **Nothing yet covers Stage 3's own blind spot**, which is *narrowing the command* — see the top of
+  this file. No later stage on this roadmap addresses it, and none is planned to, because the two
+  obvious fixes each cost more than the bypass does. **This is an open gap, not a covered one.**
 
 Where nothing covers a gap, this table and the section at the top of this file say so rather than
 leaving it to be discovered.
