@@ -49,16 +49,27 @@ check() {
 
 box=$(mktemp -d)
 trap 'rm -rf "$box"' EXIT
-for r in alpha beta; do
+# GAMMA IS A THIRD REPOSITORY AND IT EXISTS FOR ONE CONTROL.
+#
+# Every case below fires with cwd in a repository that is NOT the one the payload
+# names, because that mismatch is the only arrangement in which reading the wrong
+# key is distinguishable from reading the right one. For the precedence case that
+# is not enough: if cwd is alpha AND file_path names a file in alpha, then
+# "alpha cleared" is satisfied either by file_path being read and preferred, or
+# by NOTHING being read and the no-path branch clearing cwd's own repository.
+# Firing that case from gamma removes the coincidence.
+for r in alpha beta gamma; do
     mkdir -p "$box/$r/tests" "$box/$r/.claude"
     git -C "$box/$r" init -q
 done
 echo '{"cells":[]}' > "$box/beta/tests/test_b.ipynb"
 echo 'def test_b(): assert 1' > "$box/beta/tests/test_b.py"
+echo 'def test_a(): assert 1' > "$box/alpha/tests/test_a.py"
 
 stamp_both() {
     printf '%s|pytest|observed\n' "$(date +%s)" > "$box/alpha/.claude/.verified"
     printf '%s|pytest|observed\n' "$(date +%s)" > "$box/beta/.claude/.verified"
+    printf '%s|pytest|observed\n' "$(date +%s)" > "$box/gamma/.claude/.verified"
 }
 state() { [ -f "$1/.claude/.verified" ] && echo present || echo cleared; }
 
@@ -119,8 +130,15 @@ echo
 # `--arg` makes every value a string, so there is no way to send a JSON `false`
 # through run_from_alpha. That value is exactly what the regression guard needs.
 run_raw_from_alpha() {
+    run_raw_from "$box/alpha" "$@"
+}
+
+# run_raw_from <cwd> <tool> <raw tool_input JSON>
+# The precedence case needs cwd in a repository that neither key names.
+run_raw_from() {
+    local cwd="$1"; shift
     jq -nc --arg t "$1" --argjson ti "$2" '{tool_name:$t, tool_input:$ti}' \
-        | ( cd "$box/alpha" && CLAUDE_PROJECT_DIR="$box" bash "$TRACKER" >/dev/null 2>&1 )
+        | ( cd "$cwd" && CLAUDE_PROJECT_DIR="$box" bash "$TRACKER" >/dev/null 2>&1 )
 }
 
 echo "4. a blank or false file_path must not mask notebook_path:"
@@ -141,13 +159,27 @@ run_raw_from_alpha NotebookEdit "$(jq -nc --arg p "$box/beta/tests/test_b.ipynb"
 check "a FALSE file_path still clears BETA's stamp"        "cleared" "$(state "$box/beta")"
 check "a FALSE file_path leaves ALPHA's stamp alone"       "present" "$(state "$box/alpha")"
 
-# Precedence is pinned: with both populated, file_path wins. Firing from alpha
-# with file_path naming a file in ALPHA makes that observable — beta must be
-# untouched, which only happens if file_path was actually read and preferred.
+# Precedence is pinned: with both populated, file_path wins.
+#
+# FIRED FROM GAMMA, AND THAT IS THE WHOLE POINT. The first version of this control
+# fired from alpha while naming a file in alpha, so "alpha cleared" was satisfied
+# EITHER by file_path being read and preferred OR by nothing being read at all and
+# the no-path branch clearing cwd's own repository. Found by a Codex review of
+# this branch and confirmed by mutation: with EDITED_FILE replaced by a constant
+# empty string, eight controls in this file went red and THIS PAIR STAYED GREEN.
+#
+# It is the second time that confound has been written in two days — the same
+# defect was caught in serina-learning's suite on 2026-09-04 and fixed there the
+# same way. Reading the fix is evidently not the same as not repeating it, which
+# is why the third repository is described here rather than left to be inferred.
+#
+# With cwd in gamma, alpha can only be cleared by the payload actually being read,
+# and gamma's own stamp is asserted intact so a cwd fallback cannot hide.
 stamp_both
-run_raw_from_alpha NotebookEdit "$(jq -nc --arg f "$box/alpha/tests/test_a.py" --arg n "$box/beta/tests/test_b.ipynb" '{file_path:$f, notebook_path:$n}')"
+run_raw_from "$box/gamma" NotebookEdit "$(jq -nc --arg f "$box/alpha/tests/test_a.py" --arg n "$box/beta/tests/test_b.ipynb" '{file_path:$f, notebook_path:$n}')"
 check "with both populated, file_path wins — ALPHA is cleared" "cleared" "$(state "$box/alpha")"
 check "with both populated, BETA is left alone"                "present" "$(state "$box/beta")"
+check "with both populated, cwd's own repo is left alone"      "present" "$(state "$box/gamma")"
 echo
 
 echo "$pass passed, $fail failed"
