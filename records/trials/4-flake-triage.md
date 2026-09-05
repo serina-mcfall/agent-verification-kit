@@ -466,8 +466,24 @@ Two of the three items in the verdict above remain, unchanged:
    session, confirm the refusal is attributed to `${CLAUDE_PLUGIN_ROOT}`.
 3. **Put the command-narrowing limitation in the README.**
 
-### Disposal
+### Disposal — ruled 2026-09-06
 
-PR #6 stays **open as a draft until a human closes it.** It is the only live evidence of this check
-refusing anything, and closing it would leave this record citing a run nobody can navigate to.
-**It must never be merged** — it carries two fixture files and two deliberately malformed commits.
+**PR #6 stays open as a draft.** Serina's call, in her words: *"i will keep it for now if it start to
+become a issue I'll close it"*. Recorded as `CHG-0006`, because it is a decision about how this
+programme works rather than a detail of this stage.
+
+It is the only live evidence of this check refusing anything, and closing it would leave this record
+citing a run nobody can navigate to.
+
+**The cost is real and is recorded rather than glossed.** A red tick sits in the repository's pull
+request list looking like a failure to anyone who does not read the title. There are two now — this
+one and Stage 2's `trial/undeclared-test-change` — and one per stage scales badly. **The trigger to
+revisit is Serina judging the noise to outweigh the evidence, and it is her call, not an agent's.**
+
+The fallback, if it comes to that, is proving refusals in control suites alone. That is **weaker**,
+and the reason should be stated before anyone reaches for it as a tidy-up: it drops the claim that
+the check *failed a real pull request*, which is the only claim a suite written against the
+implementation cannot make.
+
+**Neither trial PR may ever be merged** — each carries fixture files and deliberately malformed
+commits.
