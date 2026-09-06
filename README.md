@@ -76,10 +76,16 @@ fails and clears nothing; the commit goes through on the first suite's stamp whi
 **The exposed window** is a passing run followed by a failing run with no edit between, inside 30
 minutes. That is an ordinary sequence, not a contrived one.
 
-**The fix is known**: a `PostToolUseFailure` hook, which is the event Claude Code actually fires when
-a tool call fails. It is not shipped yet. Until it is, **do not treat a green gate as proof your last
-test run passed** — treat it as proof that *some* recognised test command passed within 30 minutes and
-nothing has been edited since.
+**Fixed in `0.5.0`** by `post-bash-failure.sh`, a hook on `PostToolUseFailure` — the event Claude
+Code actually fires when a tool call fails, and the one this kit had never registered for. A failing
+test command now clears the stamp; an interrupted or timed-out one does not, because those tell you
+nothing about the code.
+
+**Not yet observed working in a live session.** Hooks are fixed at session start, so the fix cannot
+be exercised in the session that wrote it. Until someone runs a failing suite against `0.5.0` and
+watches the stamp go, treat the paragraph above as still true for your installation: **a green gate
+proves some recognised test command passed within 30 minutes and nothing has been edited since** — no
+more than that. The trial record keeps this at `fix`, not `keep`, until that run happens.
 
 ### The stamp proves a command ran, not that the command was honest
 
@@ -137,10 +143,13 @@ was built to close. Measured: a real fail-then-pass produced a stamp reading `cl
 **The script is correct.** Fed a payload carrying `exitCode: 1`, it writes the ledger exactly as
 designed. It is never called.
 
-**This is an event-subscription mistake, not a limit of the harness.** Claude Code fires
+**This was an event-subscription mistake, not a limit of the harness.** Claude Code fires
 `PostToolUseFailure` after a tool call fails, with a `Bash` matcher and a payload carrying
 `tool_name`, `tool_input`, `tool_use_id`, `error`, `error_type`, `is_interrupt` and `is_timeout`.
-The kit never registered for it. The fix is a hook on that event; it is not shipped yet.
+The kit never registered for it until `0.5.0`, which adds `post-bash-failure.sh` on that event.
+
+**Shipped, not yet observed.** The same session-start constraint applies: nothing has yet watched a
+real failure reach the new hook. The trial verdict stays `fix`.
 
 **Why the controls did not catch it**, stated precisely because the loose version is wrong: the
 suites *do* exercise the real payload shape — `test-post-bash.sh` asserts that a payload with no exit
@@ -258,7 +267,9 @@ flowchart LR
 | `post-bash.sh` | `PostToolUse` · `Bash` | Writes the stamp when a test or build command passes. Records the command, whether the exit code was observed or inferred, and whether that command had **failed earlier**. Records failures to the ledger. |
 | `edit-tracker.sh` | `PostToolUse` · `Edit\|Write\|MultiEdit\|NotebookEdit` | Clears the stamp **and the flake ledger** of the edited file's repository — an edit means the next run tests something different. Nudges every 5 edits. |
 | `verify-gate.sh` | `PreToolUse` · `Bash` | Blocks `git commit` with no fresh stamp, and blocks a **flaky** stamp unless the flake is both declared and carried in the commit. Also blocks a commit whose agent definitions name an unresolvable model. |
+| `post-bash-failure.sh` | `PostToolUseFailure` · `Bash` | **Clears** the stamp when a test command fails, and records the failure so a later pass reads as flaky. Ignores interrupted and timed-out calls. The event `PostToolUse` never delivers. |
 | `stamp-path.sh` | *sourced library* | Decides which repository's stamp is at stake. Not a hook. |
+| `classify-test-commands.sh` | *sourced library* | The one definition of what counts as a test run, shared by both `post-bash` hooks so they can never disagree. Not a hook. |
 | `flake-ledger.sh` | *sourced library* | Remembers which commands failed, so a re-run pass is distinguishable from a first pass. Not a hook. |
 | `check-models.sh` | *invoked by verify-gate* | Static check that every `model:` in an agent definition resolves. |
 | `check-flaky-trailers.sh` | *invoked by your CI* | Validates every `Flaky:` trailer on a branch and prints them. Not a hook. |
@@ -556,9 +567,9 @@ what is *observed*, not what was intended.
 
 | Stage | Mechanism | State |
 |---|---|---|
-| 1 | Evidence-required completion — the stamp protocol above | **shipped**, with a fail-open — `INC-0025` |
+| 1 | Evidence-required completion — the stamp protocol above | **shipped**; fail-open `INC-0025` fixed in 0.5.0, unobserved |
 | 2 | Test-modification guard — hook + CI twin | **shipped** |
-| 3 | `flake-triage` — a re-run pass is a distinct state from a first pass | **shipped and INERT** — `INC-0024`, cannot fire |
+| 3 | `flake-triage` — a re-run pass is a distinct state from a first pass | **shipped**; `INC-0024` fixed in 0.5.0, unobserved |
 | 4 | `mutation-gate` — diff-scoped, advisory | planned |
 | 5 | `severity-floor` — trivia fixed in place, never failing a gate | planned |
 

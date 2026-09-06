@@ -71,62 +71,28 @@ fi
 FLAKE_REPO="${VERIFIED%/.claude/.verified}"
 
 # --- Verification stamp: detect test/build commands ---
-# Match common test and build commands.
 #
-# ONE pattern, in one variable, used by both checks below. It was inline before, and
-# the attribution check added underneath needs the identical pattern — two copies of
-# a regex this long drift the first time a runner is added to one of them.
-# A SUITE ON A PATH IS STILL A SUITE, and until 2026-08-13 this pattern could not
-# say so. Every alternative below names a package manager or a language runner, so
-# a repository whose verification is a script — `check-plan.sh`, `test-hooks.sh`,
-# the very controls in this directory — had no way to earn a stamp. The gate's
-# refusal message ENDED, until this branch rewrote it, "If this project truly has
-# no tests or build, run: touch .claude/.verified" — so the project was pushed
-# down the escape hatch instead, and
-# the escape hatch is the one route the gate exists to make unnecessary. Measured
-# in launchpad-26/buzz: a plan verified by `check-plan.sh` was committed behind a
-# touched stamp because nothing here matched it.
+# THE PATTERN LIVES IN classify-test-commands.sh, not here. It moved 2026-09-06,
+# when post-bash-failure.sh arrived needing the identical question answered: a
+# FAILING test must clear the stamp (INC-0025) and be recorded in the flake ledger
+# (INC-0024), while a failing `grep` must do neither. Two copies of that regex
+# would drift the first time a runner was added to one of them, silently, and one
+# hook would then stamp a suite the other did not recognise. That is the fourth row
+# of this kit's own bypass table.
 #
-# THE SIGNAL IS THE BASENAME, and it is the only one available — a script cannot be
-# asked whether it verifies anything, and reading it to guess would be worse. So:
-# `test-`/`check-` prefixed, or `-test`/`_test(s)` suffixed, with a script
-# extension. That is a naming convention doing load-bearing work, which is a real
-# cost; it is accepted because the alternative measured worse.
-#
-# POSITION STILL DECIDES, and that is what keeps this from being a hole. The
-# anchored check below requires the match to START the final segment, so `cat
-# test-hooks.sh`, `shellcheck test-hooks.sh`, `grep -r test-hooks.sh .` and
-# `echo bash check-plan.sh` all name a suite and none of them stamps. The pipe,
-# `--help` and not-last guards apply unchanged.
-#
-# THE EXTENSION MUST END THE TOKEN, and the first version of this line did not say
-# so. `grep -E` searches rather than matches, so an extension with no trailing
-# boundary matched as a PREFIX of a longer, unrelated one — `.js` inside `.json`,
-# `.py` inside `.pyc` and `.pyi`, `.sh` inside `.sh~` and `.sh.bak`, `.rb` inside
-# `.rbi`. Measured against this hook: `node test-config.json` runs no suite, exits
-# 0 because a JSON object is valid JS, and wrote a pass stamp — a 30-minute
-# commit unlock earned by reading a fixture. Found by review before this shipped.
-#
-# `([[:space:]]|$)` is the whole fix. Every legitimate form still matches, because
-# a script being RUN is either the end of the segment or followed by its arguments.
-#
-# KNOWN NON-MATCH, stated rather than discovered later: the dot-separated JS
-# convention `foo.test.js` is not caught by either alternative, which want a `-`
-# or `_` before `test`. It fails CLOSED — such a suite earns no stamp and the
-# commit is refused visibly — so it is a gap in reach, not in safety.
-# THE SEPARATOR IS OPTIONAL, AND `check` IS A SUFFIX TOO. The first version
-# demanded `test-`/`check-` with a separator and only accepted `test`/`tests` as a
-# suffix, which missed two shapes a review measured against the driving issue:
-# `./test.sh` and `./check.sh` — very common names — and `deploy-check.sh`, which
-# the issue names in its own glob list. Both failed closed, so they cost reach
-# rather than safety, but the branch would have closed the issue while leaving the
-# issue's own example unmatched.
-#
-# Widening stays tight because the separator group is optional rather than absent:
-# `checkout.sh` and `tester.sh` still do not match, since without a `-`/`_` the
-# extension must follow the word immediately.
-SUITE_SCRIPT='((tests?|checks?)([-_][A-Za-z0-9._-]*)?|[A-Za-z0-9._-]*[-_](tests?|checks?))\.(sh|bash|zsh|py|js|mjs|cjs|ts|rb|pl)([[:space:]"'"'"']|$)'
-TEST_PATTERN='(npm\s+(test|run\s+test[s]?|run\s+build|run\s+check|run\s+lint)|npx\s+(vitest|jest|playwright)|pytest|py\.test|python3?\s+-m\s+(unittest|pytest)|go\s+test|cargo\s+test|cargo\s+build|dotnet\s+test|dotnet\s+build|make\s+test|make\s+check|bun\s+test|bun\s+run\s+test|pnpm\s+(test|run\s+test)|yarn\s+test|gradle\s+test|mvn\s+test|'"$SUITE_SCRIPT"')'
+# The reasoning behind every clause — the basename signal, why position decides,
+# why the extension must end the token — travelled with it. Read it there.
+COMMANDS_LIB="${COMMANDS_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/classify-test-commands.sh}"
+if [ -r "$COMMANDS_LIB" ]; then
+    # shellcheck source=/dev/null
+    . "$COMMANDS_LIB"
+else
+    # FAIL LOUD AND STAMP NOTHING. Without the pattern this hook cannot tell a test
+    # run from any other command, and the safe direction is to write no stamp at
+    # all rather than to guess in either direction.
+    echo "post-bash: command classifier missing at $COMMANDS_LIB — no stamp can be written, because nothing here can tell a test run from any other command." >&2
+    exit 0
+fi
 
 if echo "$COMMAND" | grep -qEi "$TEST_PATTERN"; then
     # WHAT THE PAYLOAD ACTUALLY CARRIES — re-measured 2026-08-12, and it is not
