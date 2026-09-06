@@ -207,14 +207,34 @@ fi
 # suite ran. Clearing is still right, because verification is now in doubt. Calling
 # the next successful `npm test` FLAKY would be wrong, and would tax an innocent
 # commit. So a command with a `cd` prefix clears but is not recorded.
-# A REDIRECT CAN FAIL BEFORE THE SUITE EVER STARTS. `npm test < /missing-input`
-# fails in the shell opening the input; npm is never invoked. Clearing is still
+# WHAT MAY BE RECORDED, AND WHY THE FIRST VERSION OF THIS WAS ALMOST INERT.
+#
+# A redirect can fail before the suite ever starts: `npm test < /missing-input`
+# fails in the shell opening the input and npm is never invoked. Clearing is still
 # right — verification is in doubt — but recording it would mean that once the
 # input exists, the identical passing command reads as FLAKY and costs a
-# declaration and a commit trailer, with no edit anywhere to explain it.
+# declaration and a commit trailer with no edit anywhere to explain it.
+#
+# THE SAME ARGUMENT WAS APPLIED TO A `cd` PREFIX AND THAT WAS TOO BLUNT, measured
+# in a live session on 2026-09-06. `cd /repo && npm test` is how an agent almost
+# always invokes a suite — every Bash call in the session that found this had that
+# shape — so excluding all of them meant the ledger was essentially never written
+# and flake triage stayed inert for a second, quieter reason. The stamp cleared
+# correctly and nothing was recorded, every time.
+#
+# No control could have caught it. Every control supplies the command shape its
+# author imagined; only running the thing produces the shape the harness makes.
+#
+# THE DISTINCTION THAT WAS ACTUALLY WANTED is whether the `cd` SUCCEEDED. If the
+# directory exists, the shell reached the suite and the failure is the suite's. If
+# it does not, the cd failed, no test ran, and recording would tax an innocent
+# later commit. That is checkable, cheaply and without guessing.
 RECORDABLE=yes
 case $CMD_CORE in *'<'*|*'>'*) RECORDABLE=no ;; esac
-[ "$CMD_CORE" = "$COMMAND" ] || RECORDABLE=no
+if [ -n "$TARGET_DIR" ] && [ ! -d "$TARGET_DIR" ]; then
+    # The cd could not have succeeded, so no suite ran. Clear, do not record.
+    RECORDABLE=no
+fi
 
 if [ "$CLEAR_ANYWAY" = no ] && [ "$RECORDABLE" = yes ]; then
     FLAKE_LIB="${FLAKE_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/flake-ledger.sh}"

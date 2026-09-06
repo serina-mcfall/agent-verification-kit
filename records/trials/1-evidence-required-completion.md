@@ -620,3 +620,39 @@ rather than treated as a failure.
 
 Not shipped at the time of writing. **The verdict stays `fix` until a live session shows a failing
 run clearing the stamp and the subsequent commit being refused.**
+
+---
+
+## Addendum 2 — observed, 2026-09-06
+
+**`INC-0025` is fixed and the fix has now been watched working.** Live session, plugin `0.5.1`
+installed, one repository:
+
+| Step | Result |
+|---|---|
+| `python3 test_passes.py` | exit 0 → stamp written, `…\|inferred\|clean` |
+| `python3 test_fails.py` | exit 1 → **stamp CLEARED** |
+
+That is the run Addendum 1 said was required, and it is the first time a failing test command has
+cleared a stamp in this project's history.
+
+### A claim in Addendum 1 was wrong
+
+It said hooks are fixed at session start, so the fix could not be exercised in the session that
+wrote it. **That is false.** `/reload-plugins` took the hook count from 7 to 8 and the new hook fired
+in the same session. What does *not* reload is a hook added to `settings.json` — the measurement
+probe registered there never fired, and that was generalised into a rule about all hooks without
+being checked.
+
+The cost was believing a shipped fix was untestable for the rest of an afternoon. The correction is
+cheap and the habit it points at is not: **one observation about one mechanism was turned into a
+rule about a category.**
+
+### Verdict
+
+| Was | Now |
+|---|---|
+| `fix` — `REV-0013`, named defect `INC-0025` | **`keep`** — the defect is closed and the closure is observed |
+
+`false_positives` remains 0 and now means something: the hook has run against non-test commands in a
+live session without clearing anything it should not have.

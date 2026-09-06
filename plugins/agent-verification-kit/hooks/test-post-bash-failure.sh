@@ -177,9 +177,18 @@ echo "9. RECORDING IS STRICTER THAN CLEARING:"
 # an innocent commit.
 a2=$(new_repo recA); b2=$(new_repo recB)
 fire "$a2" "cd $b2 && npm test"
-ledger_has "$b2" "npm test" && bad "a cd-prefixed failure is NOT recorded as a flake" \
-                                   "$(cat "$b2/.claude/.failed-runs" 2>/dev/null)" \
-                             || ok "a cd-prefixed failure is NOT recorded as a flake"
+# THIS CONTROL CHANGED EXPECTATION ON 2026-09-06, deliberately. It used to assert
+# that a cd-prefixed failure is NEVER recorded. A live session showed that rule
+# made the ledger essentially unwritable, because `cd /repo && npm test` is the
+# shape agents actually produce — the stamp cleared every time and nothing was
+# ever recorded. The rule is now the narrower one that was always meant: record if
+# the cd could have SUCCEEDED, which is checkable by whether the directory exists.
+ledger_has "$b2" "npm test" \
+    && ok "a cd into an EXISTING directory is recorded, in that directory" \
+    || bad "a cd into an EXISTING directory is recorded, in that directory" \
+           "$(cat "$b2/.claude/.failed-runs" 2>/dev/null || echo empty)"
+ledger_has "$a2" "npm test" && bad "and not in the one it was launched from" "recorded in A" \
+                            || ok "and not in the one it was launched from"
 d=$(new_repo recbare); fire "$d" "npm test"
 ledger_has "$d" "npm test" && ok "a bare failure IS recorded" \
                            || bad "a bare failure IS recorded" "nothing in the ledger"
@@ -242,6 +251,25 @@ stamp_exists "$d" && bad "a redirected failure still clears" "stamp survived" \
                   || ok "a redirected failure still clears"
 ledger_has "$d" "npm test" && bad "but is NOT recorded as a flake" "recorded" \
                            || ok "but is NOT recorded as a flake"
+
+# THE SHAPE AGENTS ACTUALLY PRODUCE. `cd /repo && npm test` is how a suite gets
+# invoked in practice — every Bash call in the live session that found this had
+# that shape. An earlier version excluded all of them from recording, which was
+# correct in principle and left flake triage inert in fact: the stamp cleared every
+# time and the ledger was never written once.
+d=$(new_repo cdrecord); fire "$d" "cd $d && npm test"
+stamp_exists "$d" && bad "a cd-prefixed failure clears" "stamp survived" \
+                  || ok "a cd-prefixed failure clears"
+ledger_has "$d" "npm test" \
+    && ok "AND is recorded, because the directory exists so the cd succeeded" \
+    || bad "AND is recorded, because the directory exists so the cd succeeded" \
+           "ledger empty — flake triage is inert for the commonest command shape"
+
+# The original objection still holds where it applies: if the directory is absent
+# the cd failed, no suite ran, and a later identical pass must not read as flaky.
+d=$(new_repo cdmissing); fire "$d" "cd /definitely/not/here && npm test"
+ledger_has "$d" "npm test" && bad "a cd to a MISSING directory is not recorded" "recorded" \
+                           || ok "a cd to a MISSING directory is not recorded"
 
 echo
 echo "13. THE DIRECTORY NEVER COMES FROM ARBITRARY COMMAND TEXT:"
