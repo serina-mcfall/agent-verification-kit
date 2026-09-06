@@ -45,6 +45,42 @@ If you need "nobody merges something bad", that is required status checks and ne
 admin. This kit is the other threat model: *my own agent games my tests, or I push something
 broken.* That one needs no permissions at all, which is why it is worth having.
 
+### 🔴 A FAILING TEST RUN DOES NOT CLEAR THE STAMP — measured 2026-09-06, `INC-0025`
+
+**This is the most important limitation on this page. Read it before the rest.**
+
+A commit can be allowed after a test run that failed. Proven end to end against the installed
+plugin, in one repository:
+
+```
+python3 test_always_passes.py   exit 0  → stamp written
+python3 test_always_fails.py    exit 1  → stamp NOT cleared
+git commit                              → ALLOWED
+```
+
+`post-bash.sh` contains the line *"Tests/build FAILED or unreadable. Stamp cleared."* **That branch
+has never executed.** Claude Code does not fire `PostToolUse` for a Bash call that exits non-zero, so
+the hook that would clear the stamp is never invoked. The failure handling was written, covered by
+controls against synthetic payloads, and is dead code in the real harness.
+
+**It does not need the same command twice.** `npm test` passes and stamps; `npm run test:integration`
+fails and clears nothing; the commit goes through on the first suite's stamp while the second is red.
+
+**What still protects you**, and it is not nothing:
+
+- any file **edit** clears the stamp, so the ordinary edit-then-test loop is unaffected
+- the stamp expires after **30 minutes**
+- the stamp records **which command** earned it, so `verify-gate` naming a suite you know just failed
+  is visible if you read it
+
+**The exposed window** is a passing run followed by a failing run with no edit between, inside 30
+minutes. That is an ordinary sequence, not a contrived one.
+
+**The fix is known**: a `PostToolUseFailure` hook, which is the event Claude Code actually fires when
+a tool call fails. It is not shipped yet. Until it is, **do not treat a green gate as proof your last
+test run passed** — treat it as proof that *some* recognised test command passed within 30 minutes and
+nothing has been edited since.
+
 ### The stamp proves a command ran, not that the command was honest
 
 `post-bash.sh` writes the stamp when it sees a recognised test or build command finish. It records
@@ -52,12 +88,20 @@ broken.* That one needs no permissions at all, which is why it is worth having.
 that asserts nothing still passes, and a stamp still gets written. Mutation testing is the
 countermeasure for that, and it is not in this kit yet (see *Roadmap*).
 
-### The harness currently sends no exit code, so most stamps are `inferred`
+### The harness sends no exit code, so most stamps are `inferred`
 
-`verify-gate.sh` reports this to you at the moment it unlocks a commit, rather than hiding it. An
-inferred stamp rests on a premise — that `PostToolUse` does not fire for a non-zero exit — which is
-tested but not guaranteed for every future tool shape. If that premise ever breaks, a red suite can
-unlock the gate. It will leave a trail saying so.
+`verify-gate.sh` reports this to you at the moment it unlocks a commit, rather than hiding it.
+
+An inferred stamp rests on the premise that `PostToolUse` does not fire for a non-zero exit, so the
+hook running at all means the command succeeded. **That premise is correct**, and it is what makes
+inferring success sound.
+
+**It is also exactly what causes `INC-0025` above.** The same silence that makes "the hook ran" mean
+"it passed" means a *failure* reaches no hook at all — so nothing clears the stamp. One premise, one
+sound inference and one fail-open, and the kit shipped having noticed only the first.
+
+The lesson is not "the premise was wrong". It is that a premise was written down, relied on in one
+place, contradicted in another, and never checked against the harness.
 
 ### There is a documented escape hatch, and it is deliberate
 
@@ -79,7 +123,36 @@ that route cost one explicit line, naming one exact path, is most of the defence
 and visible in the pull request. It too can be written by an agent. What it buys is that **someone
 else sees it**. Prevention is a required status check plus a human, and that needs repo admin.
 
+### Flake triage does not currently fire at all — `INC-0024`
+
+**Do not rely on it.** The section below describes the shipped code and its intended behaviour, not
+observed behaviour. It is left in place rather than deleted because deleting it would hide the
+failure instead of recording it.
+
+Same root cause as `INC-0025` above: `post-bash.sh` learns a suite failed by reading a `PostToolUse`
+payload, and that event does not fire for a failing Bash call. So no failure is recorded, the ledger
+stays empty, and a re-run pass is indistinguishable from a first pass — the precise hole this stage
+was built to close. Measured: a real fail-then-pass produced a stamp reading `clean`.
+
+**The script is correct.** Fed a payload carrying `exitCode: 1`, it writes the ledger exactly as
+designed. It is never called.
+
+**This is an event-subscription mistake, not a limit of the harness.** Claude Code fires
+`PostToolUseFailure` after a tool call fails, with a `Bash` matcher and a payload carrying
+`tool_name`, `tool_input`, `tool_use_id`, `error`, `error_type`, `is_interrupt` and `is_timeout`.
+The kit never registered for it. The fix is a hook on that event; it is not shipped yet.
+
+**Why the controls did not catch it**, stated precisely because the loose version is wrong: the
+suites *do* exercise the real payload shape — `test-post-bash.sh` asserts that a payload with no exit
+code still stamps, on the grounds that "the hook ran, so the command passed". What no control
+establishes is **which events the harness actually emits and routes**. Every control supplies a
+payload; none asks whether that payload ever arrives. A mechanism can be fully covered against the
+input it was written for and never receive it.
+
 ### Flake triage can be walked around by narrowing the command
+
+*(This limitation is real but currently moot — see above. It applies if and when the mechanism is
+made to fire.)*
 
 `post-bash.sh` remembers a test command that **failed**, so a later pass of *the same command* is
 stamped `flaky` rather than `clean`, and the gate makes you declare it. The ledger keys on the
@@ -313,6 +386,11 @@ are **not** in force. It never fails silently into defaults.
 
 ## Flake triage
 
+> ⚠️ **NOT CURRENTLY FUNCTIONING.** `PostToolUse` does not fire for a failing Bash call, so no
+> failure is ever recorded and every stamp reads `clean`. Measured 2026-09-06, `INC-0024`. What
+> follows is the intended design and the shipped code; it is not observed behaviour. **Read the
+> limitation at the top of this file before depending on any of it.**
+
 A stamp earned on the second try is not the same as a stamp earned on the first, and until Stage 3
 the protocol could not tell them apart. Re-running until green was the cheapest route to a commit.
 
@@ -324,7 +402,7 @@ ordinary debugging would be switched off, so it doesn't.
 |---|---|---|
 | suite passed first time | `clean` | allowed, silently |
 | suite failed → **you edited something** → passed | `clean` | allowed, silently |
-| suite failed → re-ran it → passed | **`flaky`** | **refused** |
+| suite failed → re-ran it → passed | *intended* **`flaky`** | *intended* **refused** — currently reads `clean` and is allowed, `INC-0024` |
 | …and you declared it | `flaky` | **still refused** — see below |
 | …and the commit carries a `Flaky:` trailer | `flaky` | allowed, and the gate names the issue |
 
@@ -354,7 +432,8 @@ git commit -m "..." --trailer "Flaky: npm test #412 races on the token clock"
 
 **`--trailer`, not a line typed into the message.** Git parses trailers only from the *final
 paragraph*, so a `Flaky:` line with any paragraph after it records **zero** trailers while looking
-perfect in `git log`. Both halves refuse that case rather than silently reading it as clean.
+perfect in `git log`. Both halves are written to refuse that case rather than silently reading it as
+clean; the CI half does so today, the hook half cannot fire at all (`INC-0024`).
 
 ### The CI half, and what it cannot do
 
@@ -368,7 +447,8 @@ their own check rather than buried. Exit `0` clean, `1` malformed, `3` could-not
 
 **It cannot detect a *missing* trailer, and never will.** By the time CI runs, the stamp that knew
 the run was flaky is gone — nothing in the repository records that a commit was made under one. Only
-the hook can require it, at the moment the stamp still exists, and it does.
+the hook can require it, at the moment the stamp still exists — and the hook is the half that is
+currently inert, so in practice nothing requires it (`INC-0024`).
 
 This is weaker than the test guard's CI half, which *can* catch an undeclared change because the
 change is sitting in the diff. The two are not equivalent and this file will not imply they are.
@@ -456,21 +536,29 @@ innocent input is *not* flagged — because a classifier that says "test" to eve
 that blocks everything would both pass a coverage count and be useless.
 
 Mechanisms are additionally trialled against hostile input before they ship. Trial logs live in
-`records/trials/`, each ending in one of four verdicts — `keep`, `fix`, `drop`, `blocked`. **Nothing
-ships on `blocked`**: that verdict exists so that "we could not check" never quietly becomes "it is
+`records/trials/`, each ending in one of four verdicts — `keep`, `fix`, `drop`, `blocked`. The rule
+is that **nothing ships on `blocked`**, so that "we could not check" never quietly becomes "it is
 fine."
+
+> **That rule was broken.** Stage 3 was merged and published while its trial record said `blocked`,
+> and it was then found not to work at all. The rule stands; the record shows it was not followed
+> once, and the reader is better served knowing that than reading a policy statement the repository
+> itself contradicts. See `records/trials/4-flake-triage.md`.
 
 ---
 
 ## Roadmap
 
-Staged, one mechanism per stage, each proven before the next.
+Staged, one mechanism per stage. **"Each proven before the next" was the intent and it was not
+followed** — Stage 3 shipped on a `blocked` verdict, and Stages 1 and 3 were both found defective
+only when finally run in a live session (`INC-0024`, `INC-0025`). The stage table below now records
+what is *observed*, not what was intended.
 
 | Stage | Mechanism | State |
 |---|---|---|
-| 1 | Evidence-required completion — the stamp protocol above | **shipped** |
+| 1 | Evidence-required completion — the stamp protocol above | **shipped**, with a fail-open — `INC-0025` |
 | 2 | Test-modification guard — hook + CI twin | **shipped** |
-| 3 | `flake-triage` — a re-run pass is a distinct state from a first pass | **shipped**, with a stated bypass |
+| 3 | `flake-triage` — a re-run pass is a distinct state from a first pass | **shipped and INERT** — `INC-0024`, cannot fire |
 | 4 | `mutation-gate` — diff-scoped, advisory | planned |
 | 5 | `severity-floor` — trivia fixed in place, never failing a gate | planned |
 

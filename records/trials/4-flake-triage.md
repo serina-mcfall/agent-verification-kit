@@ -2,7 +2,7 @@
 
 **Phase** 3 · **Started** 2026-09-04 · **Closed** — open
 **Where** `serina-mcfall/agent-verification-kit`, branch `feat/flake-triage`
-**Verdict** `blocked` overall — **CI half `keep` as of Addendum 1**, hook half `blocked`
+**Verdict** `blocked` overall — CI half `keep`, **hook half `fix`: it is INERT, see Addendum 2**
 
 ---
 
@@ -487,3 +487,124 @@ implementation cannot make.
 
 **Neither trial PR may ever be merged** — each carries fixture files and deliberately malformed
 commits.
+
+---
+
+## Addendum 2 — the hook half cannot fire, 2026-09-06
+
+The plugin was updated to `0.4.0` and the hooks were finally run in a live session. They do not work.
+
+### What was measured
+
+One repository, two runs, each the sole command in its call, against the installed plugin:
+
+| Run | Exit | Effect |
+|---|---|---|
+| `python3 test_always_fails.py` | 1 | **nothing at all** — no `.claude/` directory created |
+| `python3 test_always_passes.py` | 0 | `.claude/` created, stamp `…|inferred|clean` |
+
+And a full flaky sequence — fail, then pass, same command — produced:
+
+```
+stamp:  1788658586|python3 test_flaky.py|inferred|clean
+ledger: (none)
+```
+
+**`clean`, not `flaky`.** The laundered pass earned exactly the stamp Stage 3 exists to prevent.
+
+**The script is not at fault.** Fed a synthetic payload carrying `exitCode: 1`, the installed
+`post-bash.sh` writes the ledger correctly:
+
+```
+1788658673|python3 test_always_fails.py
+```
+
+It is never called. **Claude Code does not fire `PostToolUse` for a Bash call that exits non-zero.**
+
+### The contradiction was already written down
+
+This kit's README, under *the harness currently sends no exit code*:
+
+> An inferred stamp rests on a premise — that `PostToolUse` does not fire for a non-zero exit
+
+**Stage 1 is safe because that premise is true. Stage 3 requires it to be false.** Two mechanisms in
+one kit with mutually exclusive premises, and the conflict was documented in this repository before
+Stage 3 was designed. Nobody checked. I did not check.
+
+### Why 512 controls did not catch it
+
+The loose version of this — "every control feeds a payload containing an exit code" — is **wrong**,
+and a reviewer checked it. `test-post-bash.sh` explicitly exercises the real payload shape, asserting
+that a payload with **no** exit code still stamps, on the stated grounds that *"the hook ran, so the
+command passed"*. Interrupted payloads are covered too.
+
+The actual gap is narrower and worse. **No control establishes which events the harness emits and
+routes.** Every control supplies a payload; not one asks whether that payload ever arrives. A
+mechanism can be completely covered against the input it was written for and never receive it.
+
+That also means the premise was not merely unexamined — it was *written into a control's assertion
+text* and relied upon, while a second mechanism was built one directory away requiring its opposite.
+
+The end-to-end run in the main body of this trial shares the flaw: it drives the hooks with
+hand-built payloads. It proved the scripts implement the design. It could not, and did not, prove the
+design meets the harness.
+
+### What this costs the earlier verdicts
+
+- The `blocked` verdict in the main body was **right for the wrong reason.** It said the hooks had
+  never been observed. They have now, and they do not work.
+- **`REV-0011` is superseded.** `blocked` → `fix`: there is a named defect, not merely an unrun test.
+- `REV-0010`, the CI half's `keep`, **stands.** `check-flaky-trailers.sh` validates trailers that
+  exist and is unaffected. What the hook half's failure removes is the *automatic* pressure to add
+  one — a human or an agent can still write a `Flaky:` trailer by hand, and PR #6 contains real
+  ones. The validator is useful independently of whether anything compels its input.
+- **Command narrowing, this trial's headline limitation, is currently moot.** It describes a bypass
+  around a gate that does not close.
+
+### The fix, identified after this addendum was first written
+
+**Superseded correction.** This addendum originally proposed recording *command started* in
+`PreToolUse` and *completed* in `PostToolUse`, inferring failure from a missing completion. A
+cross-vendor review (Codex, 2026-09-06) refuted that design: permission denial, long-running and
+concurrent commands, background execution, overlapping identical commands, multiple sessions sharing
+a repository, and edits between the two events all look identical to a failure. Missing completion
+means **unknown**, not **failed**. The proposal is not sound and is withdrawn.
+
+The same review found what the diagnosis had missed. **Claude Code fires `PostToolUseFailure` after a
+tool call fails.** The kit never registered for it. Confirmed against the documentation and against
+the harness's own `/hooks` screen, which states the payload:
+
+> Input to command is JSON with `tool_name`, `tool_input`, `tool_use_id`, `error`, `error_type`,
+> `is_interrupt`, and `is_timeout`.
+
+Two properties matter. There is **no exit code** — the event firing *is* the failure signal, so
+nothing needs inferring. And `is_interrupt` and `is_timeout` are **separate fields**, which answers
+the strongest objection to the withdrawn design: an interrupted or timed-out call is distinguishable
+from a real test failure rather than guessed at.
+
+So this is an **event-subscription mistake, not a limit of the harness**, and it is cheap to fix.
+
+**Still not observed.** Hooks are fixed at session start, so a probe registered mid-session cannot
+fire. The field list above is the harness describing its own contract, which is stronger than the
+assumption that produced `INC-0024` but is **not a captured payload**. A probe is armed to capture
+one, and no control should claim conformance to the real shape until it has.
+
+### Revised numbers
+
+| Field | Was | Now | Why |
+|---|---|---|---|
+| live sessions observed | 0 | **1** | and the mechanism did not fire |
+| flaky stamps produced in anger | 0 | **0** | a real fail-then-pass produced `clean` |
+| `true_positives` | 0 | **0** | unchanged |
+| `false_positives` | 0 | **0** | it cannot fire, so it cannot misfire either |
+| plugin installs of this stage | 0 | **1** | `0.4.0`, confirmed on disk |
+
+### Verdict
+
+| Half | Verdict | Change |
+|---|---|---|
+| `check-flaky-trailers.sh` (CI) | **`keep`** | unchanged, `REV-0010` |
+| the hooks | **`fix`** | **`blocked` → `fix` 2026-09-06.** Named defect: `INC-0024` |
+
+The hook half is shipped, public and inert, and the README now says so at the top rather than the
+bottom. The CI half's `keep` is unaffected and is not being revoked by association.
