@@ -36,9 +36,81 @@ The trial is only as good as the hostility of its inputs. List them — includin
 | 2 | <a case that SHOULD NOT trip it> | passes | | |
 | 3 | <an edge case> | | | |
 | 4 | <the obvious bypass — try to defeat it on purpose> | | | |
+| 5 | <**the thing being verified FAILS** — not the guard, the subject> | | | |
 
 **Row 4 is not optional.** Every guard in this programme is meant to survive an agent that would
 rather not be stopped. If nobody tried to walk around it, the trial did not test it.
+
+**Row 5 is not optional either, and it was added on 2026-09-06 because its absence shipped a
+fail-open to a public plugin.** Stage 1 was rated `keep` on a four-probe install trial that asked
+*does the gate refuse* and *does the gate release*. Not one probe ran a **failing** test and then
+attempted a commit. The code that clears the stamp on failure had never executed — `INC-0025` —
+and a commit was permitted after a red suite for as long as the kit had existed.
+
+A mechanism has three paths, not two: it refuses, it releases, and it reacts to the subject of
+verification going wrong. The third is the one written from imagination and never exercised.
+
+---
+
+## What was observed LIVE
+
+<**Required. A trial with this section empty cannot reach `keep`.** Added 2026-09-06.>
+
+Control suites and fixtures establish that the code implements the design. **Only a live run
+establishes that the design meets the harness.** Three defects in one day were correct against 512
+controls and wrong against Claude Code: `INC-0024` (subscribed to an event that never fires for
+failures), `INC-0025` (the stamp survived a red suite), `INC-0027` (recording was inert for the
+command shape agents actually produce). Every one surfaced within minutes of the thing executing.
+
+### Run 1 — the measurement spike, BEFORE the design exists
+
+Not *"does my mechanism work"*. There is no mechanism yet. It is *"what does the harness actually
+send, and when?"* A throwaway hook that dumps its raw payload, triggered once, read.
+
+| | |
+|---|---|
+| What was measured | |
+| How | |
+| What the harness actually sends | |
+| Which design assumption this **changed** | |
+
+**This run is cheap and it is the one most likely to be skipped.** Stage 3 was designed on the
+assumption that `PostToolUse` fires for a failing command. It does not. Twenty minutes here would
+have replaced two days of building on a false premise — and the contradiction was already written in
+this repository's own README, under a heading about inferred stamps.
+
+### Run 2 — the live exercise, BEFORE the pull request leaves draft
+
+Install the working tree as a local marketplace and drive the mechanism for real:
+
+```
+/plugin marketplace add <absolute path to the worktree>
+/plugin install <plugin>@<local marketplace>
+/reload-plugins
+```
+
+A local directory is a valid marketplace source, so **this does not require merging first.** Both
+2026-09-06 defects were found by a live run that happened *after* publication; nothing about them
+required it to.
+
+Hooks reload on `/reload-plugins` — the count in `/hooks` should change. Hooks added to
+`settings.json` do **not** reload mid-session, which is a different thing and was once mistaken for
+a rule about all hooks (`NOTE-0023`).
+
+| # | What was driven | Expected | Observed | ✅/❌ |
+|---|---|---|---|---|
+| 1 | the happy path | | | |
+| 2 | the refusal path | | | |
+| 3 | **the subject of verification failing** — row 5 above, for real | | | |
+| 4 | the command shape an agent actually produces, not a tidy one | | | |
+
+**Row 4 is there because of `INC-0027`.** Every control fed `npm test`; every real invocation was
+`cd /repo && npm test`. The mechanism was correct for the shape its author imagined and inert for the
+shape the harness makes. No fixture can find that, because a fixture *is* the shape you imagined.
+
+### What the live run could not reach
+
+<Say it plainly. A live run in one repository on one machine is not a fleet.>
 
 ---
 
@@ -117,10 +189,26 @@ Add anything else this specific trial could not reach.
 
 | Verdict | Then what |
 |---|---|
-| `keep` | Ships to `launchpad-26/buzz`, this log travelling with it as evidence |
+| `keep` | Ships, this log travelling with it as evidence. **Requires a live observation — see below** |
 | `fix` | Named defect + owner, then re-trial. Does not ship on a promise |
 | `drop` | Removed. Reason recorded above so it is not silently re-proposed |
 | `blocked` | Names what would settle it. **Never ships.** |
+
+### `keep` requires a live observation — ruled 2026-09-06
+
+**A mechanism reaches `keep` only when *What was observed LIVE* records it doing its job in a real
+session against real input, including the failure path.** Green control suites are not sufficient
+and never were.
+
+`blocked` already covers *"we could not check"*. This closes the gap next to it: **"we checked the
+wrong thing."** Stage 1 held `keep` for days on evidence that was entirely real — hooks firing from
+`${CLAUDE_PLUGIN_ROOT}`, a refusal, a release — and entirely beside the point, because nothing had
+ever made the verified thing fail.
+
+**The friction is the whole cost and it should be stated.** A live run needs slash commands, so it
+needs a human, so it cannot be done by an agent working alone. That friction is exactly why three
+stages shipped without one. If this rule is going to be aspirational, it is better deleted than left
+here to be quoted.
 
 ## Record it
 
