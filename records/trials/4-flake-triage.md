@@ -2,7 +2,7 @@
 
 **Phase** 3 · **Started** 2026-09-04 · **Closed** — open
 **Where** `serina-mcfall/agent-verification-kit`, branch `feat/flake-triage`
-**Verdict** `blocked` overall — CI half `keep`, **hook half `fix`: it is INERT, see Addendum 2**
+**Verdict** **`keep`** — both halves, as of Addendum 3. Was `blocked`, then `fix`; the history is kept below
 
 ---
 
@@ -608,3 +608,86 @@ one, and no control should claim conformance to the real shape until it has.
 
 The hook half is shipped, public and inert, and the README now says so at the top rather than the
 bottom. The CI half's `keep` is unaffected and is not being revoked by association.
+
+---
+
+## Addendum 3 — the whole chain, observed, 2026-09-07
+
+**`INC-0024` is closed. Every link in Stage 3 has now been watched working in a live session**, from
+the installed plugin at `0.5.2`, against a genuinely flaky suite — one that fails on first run and
+passes on the second.
+
+### The laundering path, refused
+
+| Step | Observed |
+|---|---|
+| suite runs, **fails** | ledger written: `1788724796\|python3 test_flaky.py` |
+| same suite runs, **passes** | stamp `…\|inferred\|**flaky**` — not `clean` |
+| commit attempted | **REFUSED** |
+
+The refusal, verbatim:
+
+> COMMIT BLOCKED — the suite that unlocked this commit FAILED first and passed on a re-run.
+> command: python3 test_flaky.py
+> **It failed at 07:59 and passed at 08:00, with no edit between.**
+
+That is the defect this stage was built for, caught in the act, naming the command and both times.
+
+### The printed remedy was executed, not read
+
+This kit's ancestor shipped a refusal whose documented escape hatch was wrong about the project it
+described, and the wrong route became the trained one. So the remedy was not hand-written: the two
+commands the gate printed were run **verbatim**, then the commit retried.
+
+It was refused again — correctly — because a declaration alone is gitignored and expires:
+
+> COMMIT BLOCKED — this flake is declared locally but would leave no trace in the record.
+> `--trailer "Flaky: python3 test_flaky.py #412 races on the marker file"`
+
+Running **that** printed line allowed the commit. Git parsed the trailer, and CI reads it back:
+
+```
+check-flaky-trailers: checked 1 commit(s) — 1 declared flake(s):
+  872bafb9  python3 test_flaky.py #412 races on the marker file
+```
+
+**Both printed remedies work as printed.** Neither was reconstructed from what it was believed to say.
+
+### An honest fix still costs nothing
+
+The path that decides whether anyone keeps this installed:
+
+| Step | Observed |
+|---|---|
+| suite fails | ledger written |
+| **a file is edited** | stamp and ledger cleared |
+| suite passes | stamp `…\|inferred\|**clean**` |
+| commit | **allowed, silently** |
+
+No declaration, no trailer, no message. A mechanism that taxed ordinary debugging would be switched
+off, and this one does not.
+
+### Revised numbers
+
+| Field | Was | Now |
+|---|---|---|
+| live sessions observed | 1 | **2** |
+| flaky stamps produced in anger | 0 | **1** |
+| laundered commits refused | 0 | **1** |
+| printed remedies executed verbatim | 0 | **2**, both worked |
+| `true_positives` | 0 | **0** — the flake was a fixture written to be flaky, not a real defect caught |
+| `false_positives` | 0 | **0** — the honest-fix path produced no ceremony |
+
+### Verdict
+
+| Half | Verdict | Change |
+|---|---|---|
+| `check-flaky-trailers.sh` (CI) | **`keep`** | unchanged, `REV-0010` |
+| the hooks | **`keep`** | **`fix` → `keep` 2026-09-07.** `INC-0024` closed by observation |
+
+**This is the first verdict awarded under the rule ruled in `CHG-0008`**, and the rule is what made
+it wait: the same evidence a day earlier would have been controls and a scripted end-to-end, and
+that combination has now been wrong three times in this project.
+
+**Command narrowing remains the headline limitation** and is untouched by any of this. The mechanism
+raises the cost of laundering a red suite. It does not prevent it.
