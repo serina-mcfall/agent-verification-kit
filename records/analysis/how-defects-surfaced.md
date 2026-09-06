@@ -1,5 +1,32 @@
 # How the defects actually surfaced
 
+## In brief
+
+**What this is.** A classification of every defect recorded in this repository's event log by *how
+it was first noticed* — running the software, reading it, reviewing it, a mechanism firing, or
+someone asking a question.
+
+**Why it exists.** This project's whole claim is that automated mechanisms catch what instructions
+and good intentions do not. That claim is testable against its own record, and nobody had tested it.
+The log said *what* went wrong; it did not say *what found it*. Without that, "we found 24 defects"
+is a number with no argument attached.
+
+**What it found.** Not one defect was discovered by one of the kit's own mechanisms. Two thirds of
+the severe ones were found by **running the software** — usually within minutes of it executing, and
+always while a large control suite was green.
+
+**How to read the count.** **24 defects is not a measure of how broken this code is.** It is a
+measure of how hard it was looked at, and of a project that logs the mistakes made *while building
+it* as carefully as the ones found *in it*. Several entries are the agent's own errors, not the
+code's: a merged conflict marker, a self-inflicted regression, a diagnosis that turned out wrong.
+A project recording less would look better and be worse. Read the *proportions*, not the total.
+
+**What it cannot tell you.** Anything about other people, other machines, or whether any of this
+stops reward hacking — which is what the kit is for, and which no event here tests. The limits are
+set out in full at the end, and they are not boilerplate.
+
+---
+
 **Reconstructed 2026-09-07. This is not contemporaneous evidence.**
 
 `events.jsonl` is append-only, so a field cannot be added to a line after the fact — and a
