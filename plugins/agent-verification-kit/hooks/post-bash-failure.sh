@@ -128,28 +128,44 @@ else
     . "$COMMANDS_LIB"
 fi
 
+# THE TARGET DIRECTORY IS PARSED HERE, NOT INFERRED FROM THE WHOLE LINE.
+# stamp_target_dir_from_command searches the command text for the first `cd`, which
+# is fine for the shapes post-bash accepts and NOT fine here. Two ways it goes
+# wrong, both reproduced:
+#
+#   MASKED CHAIN. `cd /repo-A; cd /repo-B && npm test` — stripping `cd ... &&` with
+#   a `[^&]*` body swallows the `;` too, so CMD_CORE becomes a clean `npm test` and
+#   the separator check below never sees the chain. The resolver then picks
+#   /repo-A while the suite ran in /repo-B.
+#
+#   ARGUMENT TEXT. `npm test -- --grep "please cd /repo-B now"` resolves to
+#   /repo-B. A failing suite in repository A would clear B's stamp and leave A
+#   verified — a fail-open and collateral damage from one grep pattern.
+#
+# So the prefix is matched strictly, as ONE `cd` with ONE path containing no
+# whitespace, quotes or separators, and anything else falls through to "no prefix".
+# The directory never comes from anywhere but that capture.
+TARGET_DIR=""
+CMD_CORE="$COMMAND"
+# The pattern lives in a variable because an inline one needs so much quoting that
+# the first attempt at this line did not parse. One `cd`, one path, no whitespace,
+# quotes, backticks or separators inside it, then `&&`, then the rest.
+CD_PREFIX_RE='^[[:space:]]*cd[[:space:]]+([^[:space:];&|"'"'"'`]+)[[:space:]]*&&[[:space:]]*(.+)$'
+if [[ "$COMMAND" =~ $CD_PREFIX_RE ]]; then
+    TARGET_DIR="${BASH_REMATCH[1]}"
+    CMD_CORE="${BASH_REMATCH[2]}"
+fi
+
 if [ "$CLEAR_ANYWAY" = no ]; then
-    # ONE OPTIONAL LEADING `cd`, AND NOTHING ELSE COMPOUND. Exactly the shape
-    # post-bash normalises, and the restriction is load-bearing rather than tidy.
-    #
-    # An earlier draft matched the pattern anywhere in the failing line. A review
-    # showed two ways that breaks, both reproduced:
-    #
-    #   WRONG REPOSITORY. stamp_target_dir_from_command takes the FIRST textual
-    #   `cd`, so `npm test; cd /repo-B; false` resolves to /repo-B — clearing an
-    #   innocent repository's stamp while the one that actually went red keeps its
-    #   green one. Fail-open AND collateral damage from a single line.
-    #
-    #   QUOTED TEXT. `echo "text; npm test"` and heredoc bodies read as executions
-    #   once you start splitting on separators.
-    #
-    # Deciding which repository each command in an arbitrary chain ran in needs a
-    # shell parser. Refusing chains needs one line. A failing suite inside a longer
-    # chain therefore does NOT clear the stamp — a stated limitation, and the same
-    # one post-bash already has for stamping, so the two stay consistent.
-    CMD_CORE=$(printf '%s' "$COMMAND" | sed -E 's/^[[:space:]]*cd[[:space:]]+[^&]*&&[[:space:]]*//')
+    # NOTHING COMPOUND SURVIVES. Checked on CMD_CORE *after* a strictly-parsed
+    # prefix, so a second `cd` or a stray `;` inside the prefix cannot hide here.
     case $CMD_CORE in
         *';'*|*'|'*|*'&'*|*$'\n'*) exit 0 ;;
+    esac
+    case $COMMAND in
+        # And on the original too: if the line had separators that the prefix match
+        # did not consume, it was never one of the accepted shapes.
+        *';'*|*'|'*) exit 0 ;;
     esac
 
     # Anchored, not searching. `cat test-hooks.sh`, `ls test_foo.py`,
@@ -164,7 +180,9 @@ STAMP_LIB="${STAMP_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/stamp-pa
 if [ -r "$STAMP_LIB" ]; then
     # shellcheck source=/dev/null
     . "$STAMP_LIB"
-    VERIFIED=$(stamp_path_for "$(stamp_target_dir_from_command "$COMMAND")")
+    # TARGET_DIR is the strictly-parsed prefix, or empty for "the current
+    # repository". The resolver is never handed the raw command line.
+    VERIFIED=$(stamp_path_for "$TARGET_DIR")
 else
     echo "post-bash-failure: stamp resolver missing at $STAMP_LIB — clearing the shared path, which may not be the repository that was tested." >&2
     VERIFIED="${CLAUDE_PROJECT_DIR:-$(pwd)}/.claude/.verified"
@@ -189,7 +207,16 @@ fi
 # suite ran. Clearing is still right, because verification is now in doubt. Calling
 # the next successful `npm test` FLAKY would be wrong, and would tax an innocent
 # commit. So a command with a `cd` prefix clears but is not recorded.
-if [ "$CLEAR_ANYWAY" = no ] && [ "$CMD_CORE" = "$COMMAND" ]; then
+# A REDIRECT CAN FAIL BEFORE THE SUITE EVER STARTS. `npm test < /missing-input`
+# fails in the shell opening the input; npm is never invoked. Clearing is still
+# right — verification is in doubt — but recording it would mean that once the
+# input exists, the identical passing command reads as FLAKY and costs a
+# declaration and a commit trailer, with no edit anywhere to explain it.
+RECORDABLE=yes
+case $CMD_CORE in *'<'*|*'>'*) RECORDABLE=no ;; esac
+[ "$CMD_CORE" = "$COMMAND" ] || RECORDABLE=no
+
+if [ "$CLEAR_ANYWAY" = no ] && [ "$RECORDABLE" = yes ]; then
     FLAKE_LIB="${FLAKE_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/flake-ledger.sh}"
     if [ -r "$FLAKE_LIB" ]; then
         # shellcheck source=/dev/null

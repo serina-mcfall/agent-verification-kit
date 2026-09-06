@@ -236,6 +236,61 @@ stamp_exists "$d" && bad "explicit false for both flags still clears" "stamp sur
                   || ok "explicit false for both flags still clears"
 
 echo
+# A redirect can fail before the suite starts, so it clears but is not recorded.
+d=$(new_repo redirin); fire "$d" "npm test < /definitely-missing-input"
+stamp_exists "$d" && bad "a redirected failure still clears" "stamp survived" \
+                  || ok "a redirected failure still clears"
+ledger_has "$d" "npm test" && bad "but is NOT recorded as a flake" "recorded" \
+                           || ok "but is NOT recorded as a flake"
+
+echo
+echo "13. THE DIRECTORY NEVER COMES FROM ARBITRARY COMMAND TEXT:"
+# Both of these were live in the first fix and were found by a second review round.
+# stamp_target_dir_from_command SEARCHES the line for a `cd`, which is safe only for
+# the shapes post-bash accepts. Here the prefix is parsed strictly instead, and the
+# resolver is never handed the raw command.
+mkdir -p "$box/twoA/.claude" "$box/twoB/.claude"
+( cd "$box/twoA" && git init -q ); ( cd "$box/twoB" && git init -q )
+seed_two() {
+    printf '%s|npm test|inferred|clean\n' "$(date +%s)" > "$box/twoA/.claude/.verified"
+    printf '%s|npm test|inferred|clean\n' "$(date +%s)" > "$box/twoB/.claude/.verified"
+}
+fire_in_A() {
+    AVK_CMD="$1" python3 -c 'import json,os;print(json.dumps({"tool_name":"Bash","tool_input":{"command":os.environ["AVK_CMD"]}}))' \
+      | ( cd "$box/twoA" && env CLAUDE_PROJECT_DIR="$box/twoA" STAMP_LIB="$HOOKS/stamp-path.sh" \
+          FLAKE_LIB="$HOOKS/flake-ledger.sh" COMMANDS_LIB="$HOOKS/classify-test-commands.sh" \
+          bash "$SUT" >/dev/null 2>&1 )
+}
+
+# A MASKED CHAIN. `cd A; cd B && npm test` — stripping `cd ... &&` with a `[^&]*`
+# body swallows the `;` too, so CMD_CORE came out a clean `npm test` and the
+# separator check never saw the chain. The resolver then picked A while the suite
+# ran in B.
+seed_two; fire_in_A "cd $box/twoA; cd $box/twoB && npm test"
+{ [ -f "$box/twoA/.claude/.verified" ] && [ -f "$box/twoB/.claude/.verified" ]; } \
+    && ok "a chain masked by the cd-prefix strip clears NOTHING" \
+    || bad "a chain masked by the cd-prefix strip clears NOTHING" "a stamp was cleared"
+
+# ARGUMENT TEXT. `npm test -- --grep "please cd /repo-B now"` resolved to /repo-B,
+# so a failure in A would clear B and leave A verified — fail-open plus collateral
+# damage from one grep pattern.
+seed_two; fire_in_A "npm test -- --grep \"please cd $box/twoB now\""
+[ -f "$box/twoB/.claude/.verified" ] \
+    && ok "a directory named in an ARGUMENT does not steer the clear" \
+    || bad "a directory named in an ARGUMENT does not steer the clear" "repo B was cleared"
+[ -f "$box/twoA/.claude/.verified" ] \
+    && bad "and the repository actually under test is the one cleared" "A kept its stamp" \
+    || ok "and the repository actually under test is the one cleared"
+
+# The legitimate prefix must still work, or the fix has traded one bug for another.
+seed_two; fire_in_A "cd $box/twoB && npm test"
+[ -f "$box/twoB/.claude/.verified" ] \
+    && bad "an explicit 'cd B && npm test' clears B" "B kept its stamp" \
+    || ok "an explicit 'cd B && npm test' clears B"
+[ -f "$box/twoA/.claude/.verified" ] \
+    && ok "and leaves A alone" || bad "and leaves A alone" "A was cleared"
+
+echo
 echo "13. IT CAN NEVER BLOCK, so it must never try:"
 d=$(new_repo exitcode); fire "$d" "npm test"
 [ "$RC" = 0 ] && ok "exit 0 on the acting path" || bad "exit 0 on the acting path" "rc=$RC"
