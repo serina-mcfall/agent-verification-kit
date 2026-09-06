@@ -87,6 +87,19 @@ watches the stamp go, treat the paragraph above as still true for your installat
 proves some recognised test command passed within 30 minutes and nothing has been edited since** — no
 more than that. The trial record keeps this at `fix`, not `keep`, until that run happens.
 
+**Four shapes it still does not clear on**, each a deliberate choice with the reasoning recorded in
+`post-bash-failure.sh`:
+
+| Shape | Why not |
+|---|---|
+| `npm test; something-else` — any chain beyond a leading `cd` | The stamp resolver takes the *first* textual `cd`, so acting on chains clears the **wrong repository's** stamp while the red one keeps its green. Refusing chains is one line; resolving them needs a shell parser. |
+| `bash -x test-hooks.sh`, `python3 -u test_x.py` | Wrapper flags are not admitted, in either hook. Some flags mean *do not actually run* — `bash -n`, `ruby -c`, `node -e` — and admitting them would let a **green** stamp be written for a command that ran no suite. A false pass is worse than this miss. |
+| `npm test \|\| true` | The shell call succeeds, so no failure event fires at all. Nothing can see it. |
+| a suite run through some other tool | The hook matches `Bash` only. |
+
+The first two are symmetric — those shapes do not earn a stamp either, so the two hooks stay
+consistent rather than one being stricter than the other.
+
 ### The stamp proves a command ran, not that the command was honest
 
 `post-bash.sh` writes the stamp when it sees a recognised test or build command finish. It records
@@ -269,7 +282,7 @@ flowchart LR
 | `verify-gate.sh` | `PreToolUse` · `Bash` | Blocks `git commit` with no fresh stamp, and blocks a **flaky** stamp unless the flake is both declared and carried in the commit. Also blocks a commit whose agent definitions name an unresolvable model. |
 | `post-bash-failure.sh` | `PostToolUseFailure` · `Bash` | **Clears** the stamp when a test command fails, and records the failure so a later pass reads as flaky. Ignores interrupted and timed-out calls. The event `PostToolUse` never delivers. |
 | `stamp-path.sh` | *sourced library* | Decides which repository's stamp is at stake. Not a hook. |
-| `classify-test-commands.sh` | *sourced library* | The one definition of what counts as a test run, shared by both `post-bash` hooks so they can never disagree. Not a hook. |
+| `classify-test-commands.sh` | *sourced library* | The runner patterns and wrapper rule, shared by both `post-bash` hooks so neither can drift from the other on what a test command looks like. They still apply their own rules around it. Not a hook. |
 | `flake-ledger.sh` | *sourced library* | Remembers which commands failed, so a re-run pass is distinguishable from a first pass. Not a hook. |
 | `check-models.sh` | *invoked by verify-gate* | Static check that every `model:` in an agent definition resolves. |
 | `check-flaky-trailers.sh` | *invoked by your CI* | Validates every `Flaky:` trailer on a branch and prints them. Not a hook. |

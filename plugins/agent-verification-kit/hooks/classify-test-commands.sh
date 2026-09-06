@@ -61,4 +61,44 @@
 # ---------------------------------------------------------------------------
 
 SUITE_SCRIPT='((tests?|checks?)([-_][A-Za-z0-9._-]*)?|[A-Za-z0-9._-]*[-_](tests?|checks?))\.(sh|bash|zsh|py|js|mjs|cjs|ts|rb|pl)([[:space:]"'"'"']|$)'
-TEST_PATTERN='(npm\s+(test|run\s+test[s]?|run\s+build|run\s+check|run\s+lint)|npx\s+(vitest|jest|playwright)|pytest|py\.test|python3?\s+-m\s+(unittest|pytest)|go\s+test|cargo\s+test|cargo\s+build|dotnet\s+test|dotnet\s+build|make\s+test|make\s+check|bun\s+test|bun\s+run\s+test|pnpm\s+(test|run\s+test)|yarn\s+test|gradle\s+test|mvn\s+test|'"$SUITE_SCRIPT"')'
+# THE RUNNER LIST NEEDS ITS OWN TRAILING BOUNDARY, and did not have one until
+# 2026-09-06. `grep -E` searches, so every bare alternative matched as a PREFIX of
+# a longer word: `pytest` inside `pytest-other`, `npm test` inside `npm testing`,
+# `go test` inside `go testdata`. Measured against the shipped hook — a successful
+# `pytest-other` wrote a pass stamp, a 30-minute commit unlock earned by a command
+# that ran no suite. Exactly the defect `([[:space:]"']|$)` already fixed for
+# SUITE_SCRIPT's extensions, in the half of the pattern nobody re-read.
+# Found by cross-vendor review of the PostToolUseFailure hook, not by these
+# controls, which had no case for it.
+TEST_RUNNER='(npm\s+(test|run\s+test[s]?|run\s+build|run\s+check|run\s+lint)|npx\s+(vitest|jest|playwright)|pytest|py\.test|python3?\s+-m\s+(unittest|pytest)|go\s+test|cargo\s+test|cargo\s+build|dotnet\s+test|dotnet\s+build|make\s+test|make\s+check|bun\s+test|bun\s+run\s+test|pnpm\s+(test|run\s+test)|yarn\s+test|gradle\s+test|mvn\s+test)'
+TEST_PATTERN='('"$TEST_RUNNER"'([[:space:]"'"'"']|$)|'"$SUITE_SCRIPT"')'
+
+# WHAT MAY PRECEDE THE SUITE. Env assignments and a small set of wrappers — and
+# NO FLAGS. Shared with post-bash.sh from 2026-09-06 so post-bash-failure.sh cannot
+# drift from it.
+#
+# A CROSS-VENDOR REVIEW ASKED FOR A FLAG GROUP HERE AND THE CONTROLS REFUTED IT.
+# The observation was correct: `bash -x test-hooks.sh` and `python3 -u test_x.py`
+# are real runs this does not match, which is fail-closed for stamping and
+# FAIL-OPEN for clearing. The proposed fix — allow `(-[^[:space:]]+[[:space:]]+)*`
+# after each wrapper — was tried, and eighteen controls in test-post-bash.sh went
+# red at once, by name:
+#
+#   bash -n syntax-checks, it does not run       ruby -c / perl -c do not run
+#   node -e code does not stamp                  command -v is a lookup, not a run
+#   sudo -u takes a username                     bash -O takes a shopt name
+#
+# Two separate reasons, both fatal. Some flags mean DO NOT ACTUALLY RUN (`-n`,
+# `-c`, `-e`, `-v`), so admitting them would write a GREEN stamp for a command that
+# executed no suite — a false pass, strictly worse than the fail-open it fixes.
+# Others CONSUME THE NEXT TOKEN (`-u`, `-O`), so the thing that looks like a suite
+# is a flag's argument.
+#
+# The controls carry "(flag class deleted)" in their names: someone had already
+# tried this and written them to stop it returning. They worked.
+#
+# SO IT STAYS A KNOWN LIMITATION, in both directions and stated in the README: a
+# suite run behind a wrapper flag neither stamps nor clears. Telling `-x` from `-n`
+# needs per-wrapper flag semantics, and being wrong in the permissive direction
+# costs a false green.
+RUN_LEAD='^[[:space:]]*(([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*|env|time|nohup|sudo|command|exec|bash|sh|zsh|python3?|node|bun|deno|ruby|perl)[[:space:]]+)*["'"'"']?([^[:space:]]*/)?'

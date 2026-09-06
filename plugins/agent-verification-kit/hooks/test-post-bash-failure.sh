@@ -12,27 +12,36 @@
 # Both because Claude Code does not fire `PostToolUse` for a Bash call that exits
 # non-zero. It fires `PostToolUseFailure`, and the kit never registered for it.
 #
-# THE DIRECTION OF STRICTNESS IS DELIBERATELY OPPOSITE TO post-bash.sh, and that is
-# the design decision most worth reviewing here.
+# THE DIRECTION OF STRICTNESS, IN THREE STEPS, and it is not a single dial.
+# An earlier draft had one — "clearing is liberal" — and a review showed it clears
+# the stamp on a failed `ls test_foo.py` and, worse, clears the WRONG repository's
+# stamp on a chained command. Both reproduced. So:
 #
-#   STAMPING is strict: if there is any doubt the exit code belongs to the test
-#   command, write no stamp. A wrong stamp unlocks a commit.
+#   WHAT COUNTS AS A RUN is exactly what post-bash counts, via the shared
+#   classifier. Naming a suite is not running one, in either hook.
 #
-#   CLEARING is liberal: if a failing command looks like a test run at all, clear.
-#   A wrong clear costs one re-run of the suite. A wrong keep costs a commit on a
-#   red suite.
+#   CLEARING is liberal about DOUBT: post-bash refuses to stamp when it cannot
+#   attribute an unknown exit code, but here the failure is certain — the event
+#   only fires on one — so ambiguity about which command failed still clears.
+#   Verification in doubt should not stand.
 #
-# Same safety goal, opposite thresholds, because the two errors do not cost the
-# same thing. A control below asserts the liberal direction explicitly so nobody
-# "fixes" it into symmetry later.
+#   RECORDING A FLAKE is the strictest of the three, because it is the most
+#   expensive: it costs a declaration and a commit trailer on the next pass, not
+#   just a re-run. Only an unambiguous bare command is recorded.
+#
+# Controls assert all three, including the limitation that a chain is refused.
 #
 # NOT YET VERIFIED AGAINST A REAL PAYLOAD. Hooks are fixed at session start, so a
-# probe registered mid-session cannot fire. The field names below come from the
-# harness's own /hooks screen — "Input to command is JSON with tool_name,
-# tool_input, tool_use_id, error, error_type, is_interrupt, and is_timeout" — which
-# is the harness describing its own contract, and is stronger than the assumption
-# that produced INC-0024. It is still not a captured payload. Section 9 exists to
-# fail the moment a real one disagrees.
+# probe registered mid-session cannot fire. The field names come from the harness's
+# own /hooks screen — "Input to command is JSON with tool_name, tool_input,
+# tool_use_id, error, error_type, is_interrupt, and is_timeout" — which is the
+# harness describing its own contract, and is stronger than the assumption that
+# produced INC-0024. It is still not a captured payload.
+#
+# Section 12 is scoped honestly about that: fixtures cannot detect a contract
+# change, because a fixture is the contract you already believe in. What it does
+# assert is that the hook reads the documented names and no others, so a change
+# surfaces as a red control rather than as silence.
 
 HOOKS="${1:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
 SUT="$HOOKS/post-bash-failure.sh"
@@ -123,80 +132,115 @@ ledger_has "$d" "npm test" && bad "and records no flake" "timeout recorded as a 
 # behaviour flake triage exists to discourage.
 
 echo
-echo "6. CLEARING IS DELIBERATELY MORE LIBERAL THAN STAMPING:"
-# post-bash refuses to stamp a chained command, because the exit code describes the
-# whole line. This hook still CLEARS on one, because the costs are asymmetric: a
-# wrong clear costs a re-run, a wrong keep costs a commit on a red suite.
-d=$(new_repo chained); fire "$d" "cd /tmp && npm test"
-stamp_exists "$d" && bad "a chained command containing a test still clears" "stamp survived" \
-                  || ok "a chained command containing a test still clears"
+echo "6. NAMING A SUITE IS NOT RUNNING ONE:"
+# The first draft of this hook matched the pattern ANYWHERE in the failing line, so
+# every one of these cleared the stamp. A failed `ls` silently wiping verification
+# is how a gate gets switched off, which is this project's own false-positive rule.
+for c in 'cat test-hooks.sh' 'ls test_foo.py' 'grep -r "npm test" .' 'echo npm test' 'shellcheck test-runner.sh'; do
+    d=$(new_repo "names$(echo "$c" | tr -cd '[:alnum:]')"); fire "$d" "$c"
+    stamp_exists "$d" && ok "'$c' does not clear the stamp" \
+                      || bad "'$c' does not clear the stamp" "stamp was cleared"
+done
 
 echo
-echo "7. THE TWO FIXES ARE NOT COUPLED:"
-# INC-0025 must be closed even if the flake ledger is unavailable. If clearing the
-# stamp depended on the ledger loading, one missing file would reopen the fail-open.
-d=$(new_repo noledger)
-RC=0
-ERR=$(AVK_CMD="npm test" python3 -c '
-import json,os
-print(json.dumps({"tool_name":"Bash","tool_input":{"command":os.environ["AVK_CMD"]},
-  "tool_use_id":"t","error":"exit 1","error_type":"execution_error"}))' \
-  | ( cd "$d" && env CLAUDE_PROJECT_DIR="$d" STAMP_LIB="$HOOKS/stamp-path.sh" \
-      FLAKE_LIB="$box/definitely-absent.sh" COMMANDS_LIB="$HOOKS/classify-test-commands.sh" \
-      bash "$SUT" 2>&1 >/dev/null )) || RC=$?
-stamp_exists "$d" && bad "the stamp is cleared even with no flake ledger" "stamp survived" \
-                  || ok "the stamp is cleared even with no flake ledger"
-printf '%s' "$ERR" | grep -qi "ledger" \
-    && ok "and it says the ledger was missing rather than failing silently" \
-    || bad "and it says the ledger was missing rather than failing silently" "$ERR"
+echo "7. A CHAIN BEYOND A LEADING cd IS REFUSED, and that is a real limitation:"
+# Reproduced during review: stamp_target_dir_from_command takes the FIRST textual
+# `cd`, so acting on arbitrary chains clears the WRONG repository's stamp while the
+# one that actually went red keeps its green one. Refusing chains costs one line;
+# resolving them correctly needs a shell parser.
+d=$(new_repo chainrefused); fire "$d" 'npm test; cd /elsewhere; false'
+stamp_exists "$d" && ok "a semicolon chain does not clear (stated limitation)" \
+                  || bad "a semicolon chain does not clear (stated limitation)" "cleared"
+d=$(new_repo piperefused); fire "$d" 'npm test | tee out.log'
+stamp_exists "$d" && ok "a pipe does not clear (stated limitation)" \
+                  || bad "a pipe does not clear (stated limitation)" "cleared"
 
 echo
-echo "8. FAILURE MODES ANNOUNCE THEMSELVES:"
+echo "8. A LEADING cd CLEARS THE REPOSITORY THAT WAS TESTED, AND ONLY THAT ONE:"
+# The previous version of this control used `cd /tmp && npm test` and asserted the
+# TEMP repo's stamp vanished. /tmp is not a git repository, so the resolver fell
+# back to CLAUDE_PROJECT_DIR and cleared the seeded stamp BY ACCIDENT — a control
+# passing for a reason other than the behaviour it claimed. Two real repositories
+# now, and the untargeted one must be untouched.
+a=$(new_repo repoA); b=$(new_repo repoB)
+fire "$a" "cd $b && npm test"
+stamp_exists "$b" && bad "the tested repository's stamp is cleared" "repo B kept its stamp" \
+                  || ok "the tested repository's stamp is cleared"
+stamp_exists "$a" && ok "and the OTHER repository is left alone" \
+                  || bad "and the OTHER repository is left alone" "repo A was cleared too"
+
+echo
+echo "9. RECORDING IS STRICTER THAN CLEARING:"
+# Clearing costs one re-run. A flake record costs a declaration AND a commit
+# trailer on the next pass. `cd /missing && npm test` fails because the directory
+# is absent — no suite ran — so calling the next passing `npm test` flaky would tax
+# an innocent commit.
+a2=$(new_repo recA); b2=$(new_repo recB)
+fire "$a2" "cd $b2 && npm test"
+ledger_has "$b2" "npm test" && bad "a cd-prefixed failure is NOT recorded as a flake" \
+                                   "$(cat "$b2/.claude/.failed-runs" 2>/dev/null)" \
+                             || ok "a cd-prefixed failure is NOT recorded as a flake"
+d=$(new_repo recbare); fire "$d" "npm test"
+ledger_has "$d" "npm test" && ok "a bare failure IS recorded" \
+                           || bad "a bare failure IS recorded" "nothing in the ledger"
+
+echo
+echo "10. A MISSING CLASSIFIER FAILS CLOSED — opposite to post-bash, on purpose:"
+# post-bash declines to WRITE a stamp without the classifier, which is safe. If
+# this hook declined to CLEAR, a classifier going missing after a green run would
+# reopen INC-0025 in silence. So it clears and says why.
 d=$(new_repo noclassifier)
-RC=0
 ERR=$(printf '{"tool_name":"Bash","tool_input":{"command":"npm test"}}' \
   | ( cd "$d" && env CLAUDE_PROJECT_DIR="$d" STAMP_LIB="$HOOKS/stamp-path.sh" \
       FLAKE_LIB="$HOOKS/flake-ledger.sh" COMMANDS_LIB="$box/absent.sh" \
-      bash "$SUT" 2>&1 >/dev/null )) || RC=$?
-printf '%s' "$ERR" | grep -qi "classifier\|classify" \
-    && ok "a missing classifier is announced" || bad "a missing classifier is announced" "$ERR"
-stamp_exists "$d" && ok "and nothing is cleared on a guess" \
-                  || bad "and nothing is cleared on a guess" "stamp cleared without a classifier"
-
-d=$(new_repo emptypayload)
-RC=0
-ERR=$(printf '' | ( cd "$d" && env CLAUDE_PROJECT_DIR="$d" STAMP_LIB="$HOOKS/stamp-path.sh" \
-      FLAKE_LIB="$HOOKS/flake-ledger.sh" COMMANDS_LIB="$HOOKS/classify-test-commands.sh" \
-      bash "$SUT" 2>&1 >/dev/null )) || RC=$?
-printf '%s' "$ERR" | grep -qi "empty payload\|cannot see" \
-    && ok "an empty payload is announced, not treated as 'no test failed'" \
-    || bad "an empty payload is announced, not treated as 'no test failed'" "$ERR"
+      bash "$SUT" 2>&1 >/dev/null ))
+stamp_exists "$d" && bad "a missing classifier still clears the stamp" "stamp survived" \
+                  || ok "a missing classifier still clears the stamp"
+printf '%s' "$ERR" | grep -qi "classifier" \
+    && ok "and says the classifier was missing" || bad "and says the classifier was missing" "$ERR"
+ledger_has "$d" "npm test" && bad "but records no flake, having classified nothing" "recorded" \
+                           || ok "but records no flake, having classified nothing"
 
 echo
-echo "9. THE PAYLOAD CONTRACT THIS HOOK DEPENDS ON:"
-# These names come from the harness's /hooks screen, NOT from a captured payload.
-# If a real payload ever uses different names, this section is where it surfaces —
-# INC-0024 happened because nothing checked the shape the harness actually sends.
-d=$(new_repo contract); fire "$d" "npm test"
-stamp_exists "$d" && bad "tool_input.command is where the command lives" "not read" \
-                  || ok "tool_input.command is where the command lives"
-d=$(new_repo contract2)
-RC=0
-printf '{"tool_name":"Bash","tool_input":{"command":"npm test"},"is_interrupt":false,"is_timeout":false}' \
+echo "11. AN UNREADABLE PAYLOAD ANNOUNCES ITSELF:"
+# All three of these once exited quietly, so "the payload broke" and "no test
+# failed" were indistinguishable — while a stamp a red suite should have cleared
+# stayed put.
+for bad_payload in '' 'not json at all' '{"tool_name":"Bash"}'; do
+    d=$(new_repo "payload$RANDOM")
+    ERR=$(printf '%s' "$bad_payload" | ( cd "$d" && env CLAUDE_PROJECT_DIR="$d" \
+        STAMP_LIB="$HOOKS/stamp-path.sh" FLAKE_LIB="$HOOKS/flake-ledger.sh" \
+        COMMANDS_LIB="$HOOKS/classify-test-commands.sh" bash "$SUT" 2>&1 >/dev/null ))
+    [ -n "$ERR" ] && ok "payload ${bad_payload:-(empty)} is announced" \
+                  || bad "payload ${bad_payload:-(empty)} is announced" "silent"
+done
+
+echo
+echo "12. THE PAYLOAD FIELD NAMES THIS HOOK DEPENDS ON:"
+# HONEST SCOPE, because the previous version of this section claimed more than it
+# could deliver: it manufactured the same payload every time, so it could not
+# possibly detect a real payload that disagreed — which was the one thing it was
+# written for. It cannot be made to do that from fixtures alone.
+#
+# What it CAN assert is that the hook reads the documented names and no others, so
+# a contract change surfaces as these controls failing rather than as silence.
+d=$(new_repo fieldnames)
+printf '{"tool_name":"Bash","tool_input":{"cmd":"npm test"}}' \
   | ( cd "$d" && env CLAUDE_PROJECT_DIR="$d" STAMP_LIB="$HOOKS/stamp-path.sh" \
       FLAKE_LIB="$HOOKS/flake-ledger.sh" COMMANDS_LIB="$HOOKS/classify-test-commands.sh" \
       bash "$SUT" >/dev/null 2>&1 )
+stamp_exists "$d" && ok "a payload using .tool_input.cmd is not silently acted on" \
+                  || bad "a payload using .tool_input.cmd is not silently acted on" "cleared"
+d=$(new_repo bothflags); fire "$d" "npm test" '{"is_interrupt":false,"is_timeout":false}'
 stamp_exists "$d" && bad "explicit false for both flags still clears" "stamp survived" \
                   || ok "explicit false for both flags still clears"
 
 echo
-echo "10. IT CAN NEVER BLOCK, so it must never try:"
-# Per the harness: exit 2 shows stderr to the model; the tool already failed.
-# Nothing this hook does should look like an attempt to veto.
+echo "13. IT CAN NEVER BLOCK, so it must never try:"
 d=$(new_repo exitcode); fire "$d" "npm test"
-[ "$RC" = 0 ] && ok "exit code is 0 on the acting path" || bad "exit code is 0 on the acting path" "rc=$RC"
+[ "$RC" = 0 ] && ok "exit 0 on the acting path" || bad "exit 0 on the acting path" "rc=$RC"
 d=$(new_repo exitcode2); fire "$d" "grep x y"
-[ "$RC" = 0 ] && ok "exit code is 0 on the no-op path" || bad "exit code is 0 on the no-op path" "rc=$RC"
+[ "$RC" = 0 ] && ok "exit 0 on the no-op path" || bad "exit 0 on the no-op path" "rc=$RC"
 
 echo
 echo "$pass passed, $fail failed"

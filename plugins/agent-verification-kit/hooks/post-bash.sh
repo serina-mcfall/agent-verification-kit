@@ -273,7 +273,10 @@ if echo "$COMMAND" | grep -qEi "$TEST_PATTERN"; then
     # THE COST, and it is the same trade already taken for metacharacters:
     #   bash -x test-hooks.sh      python3 -u test_x.py      node --test test-foo.js
     # no longer stamp. Two calls, or drop the flag. Every one of them fails CLOSED.
-    RUN_LEAD='^[[:space:]]*(([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*|env|time|nohup|sudo|command|exec|bash|sh|zsh|python3?|node|bun|deno|ruby|perl)[[:space:]]+)*["'"'"']?([^[:space:]]*/)?'
+    # RUN_LEAD now lives in classify-test-commands.sh, sourced above, so this hook
+    # and post-bash-failure.sh cannot disagree about what may precede a suite.
+    # The flag group inside it was added 2026-09-06: `bash -x test-hooks.sh` and
+    # `python3 -u test_x.py` are real runs that the old form did not match.
 
     # ASKING A RUNNER ABOUT ITSELF IS NOT RUNNING IT, AND IT EXITS 0.
     #

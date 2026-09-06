@@ -82,8 +82,20 @@ if ! command -v jq >/dev/null 2>&1; then
     exit 0
 fi
 
-COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
-[ -n "$COMMAND" ] || exit 0
+# PARSE STATUS IS CHECKED SEPARATELY FROM THE VALUE. An earlier draft read the
+# command with `jq -r ... 2>/dev/null` and exited quietly when it came back empty,
+# so INVALID JSON and "this call had no command" were indistinguishable — and both
+# silently preserved a stamp that a red suite should have cleared. The header of
+# this file promises an unreadable payload announces itself; it did not.
+if ! printf '%s' "$INPUT" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    echo "post-bash-failure: payload is not a JSON object — cannot tell whether a test run failed, so the stamp is left standing. It may now outlive a red suite." >&2
+    exit 0
+fi
+COMMAND=$(printf '%s' "$INPUT" | jq -r 'if (.tool_input.command | type) == "string" then .tool_input.command else empty end' 2>/dev/null)
+if [ -z "$COMMAND" ]; then
+    echo "post-bash-failure: no string .tool_input.command in the payload — this hook cannot tell what failed. If the harness has changed shape, INC-0024 is repeating." >&2
+    exit 0
+fi
 
 # `== true` rather than truthiness: a missing field must read as absent, and jq's
 # `//` would fall through on a literal false anyway. Both flags are checked
@@ -95,22 +107,57 @@ if [ "$IS_INTERRUPT" = true ] || [ "$IS_TIMEOUT" = true ]; then
 fi
 
 # --- Is this a test run at all? -------------------------------------------------
-# The pattern is shared with post-bash.sh rather than copied. Two copies of it
-# would drift the first time a runner was added to one of them, and one hook would
-# then stamp a suite the other did not recognise — the fourth row of the README's
-# bypass table.
+# The pattern and the wrapper rule are shared with post-bash.sh rather than copied.
+# Two copies would drift the first time a runner was added to one of them, and one
+# hook would then act on a suite the other did not recognise — the fourth row of the
+# README's bypass table.
 COMMANDS_LIB="${COMMANDS_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/classify-test-commands.sh}"
 if [ ! -r "$COMMANDS_LIB" ]; then
-    echo "post-bash-failure: command classifier missing at $COMMANDS_LIB — cannot tell a failed test run from a failed 'ls', so nothing is cleared. The stamp may now outlive a red suite." >&2
-    exit 0
+    # FAIL CLOSED, WHICH IS THE OPPOSITE OF WHAT post-bash DOES HERE, and the
+    # asymmetry is the point. Without the classifier post-bash cannot tell a test
+    # from anything else, so it declines to WRITE a stamp — safe. If this hook
+    # likewise declined to CLEAR, a classifier that went missing after a green run
+    # would reopen INC-0025 in silence. So: clear, and say why. The cost is that a
+    # broken install wipes the stamp on any failed command, which is loud and
+    # correct for a broken install.
+    echo "post-bash-failure: command classifier missing at $COMMANDS_LIB — clearing the stamp anyway, because a failure occurred and this hook cannot rule out that it was a test run." >&2
+    CLEAR_ANYWAY=yes
+else
+    CLEAR_ANYWAY=no
+    # shellcheck source=/dev/null
+    . "$COMMANDS_LIB"
 fi
-# shellcheck source=/dev/null
-. "$COMMANDS_LIB"
 
-# Searching, not anchored. This is the liberal direction described above: post-bash
-# anchors to the final segment before it will stamp; this hook clears if a test
-# command appears anywhere in the failing line.
-printf '%s' "$COMMAND" | grep -qEi "$TEST_PATTERN" || exit 0
+if [ "$CLEAR_ANYWAY" = no ]; then
+    # ONE OPTIONAL LEADING `cd`, AND NOTHING ELSE COMPOUND. Exactly the shape
+    # post-bash normalises, and the restriction is load-bearing rather than tidy.
+    #
+    # An earlier draft matched the pattern anywhere in the failing line. A review
+    # showed two ways that breaks, both reproduced:
+    #
+    #   WRONG REPOSITORY. stamp_target_dir_from_command takes the FIRST textual
+    #   `cd`, so `npm test; cd /repo-B; false` resolves to /repo-B — clearing an
+    #   innocent repository's stamp while the one that actually went red keeps its
+    #   green one. Fail-open AND collateral damage from a single line.
+    #
+    #   QUOTED TEXT. `echo "text; npm test"` and heredoc bodies read as executions
+    #   once you start splitting on separators.
+    #
+    # Deciding which repository each command in an arbitrary chain ran in needs a
+    # shell parser. Refusing chains needs one line. A failing suite inside a longer
+    # chain therefore does NOT clear the stamp — a stated limitation, and the same
+    # one post-bash already has for stamping, so the two stay consistent.
+    CMD_CORE=$(printf '%s' "$COMMAND" | sed -E 's/^[[:space:]]*cd[[:space:]]+[^&]*&&[[:space:]]*//')
+    case $CMD_CORE in
+        *';'*|*'|'*|*'&'*|*$'\n'*) exit 0 ;;
+    esac
+
+    # Anchored, not searching. `cat test-hooks.sh`, `ls test_foo.py`,
+    # `grep -r "npm test" .` and `echo npm test` all NAME a suite without running
+    # one; an unanchored match cleared the stamp on every one of them. A failed `ls`
+    # silently wiping verification is how a gate gets switched off.
+    printf '%s' "$CMD_CORE" | grep -qEi "${RUN_LEAD}${TEST_PATTERN}" || exit 0
+fi
 
 # --- Which repository's stamp? --------------------------------------------------
 STAMP_LIB="${STAMP_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/stamp-path.sh}"
@@ -133,14 +180,29 @@ if [ -f "$VERIFIED" ]; then
 fi
 
 # --- INC-0024: record it, so a later pass on the same command reads as flaky ----
-FLAKE_LIB="${FLAKE_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/flake-ledger.sh}"
-if [ -r "$FLAKE_LIB" ]; then
-    # shellcheck source=/dev/null
-    if . "$FLAKE_LIB"; then
-        flake_record "$REPO" "$COMMAND"
+# RECORDING IS STRICTER THAN CLEARING, and that is the honest form of the asymmetry
+# in this file's header. Clearing costs one re-run. A flake record costs a
+# DECLARATION AND A COMMIT TRAILER on the next pass, which is far more than a
+# re-run — so it is only written when the command is unambiguous.
+#
+# `cd /somewhere-missing && npm test` fails because the directory is absent; no
+# suite ran. Clearing is still right, because verification is now in doubt. Calling
+# the next successful `npm test` FLAKY would be wrong, and would tax an innocent
+# commit. So a command with a `cd` prefix clears but is not recorded.
+if [ "$CLEAR_ANYWAY" = no ] && [ "$CMD_CORE" = "$COMMAND" ]; then
+    FLAKE_LIB="${FLAKE_LIB:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/flake-ledger.sh}"
+    if [ -r "$FLAKE_LIB" ]; then
+        # shellcheck source=/dev/null
+        if . "$FLAKE_LIB"; then
+            # CMD_CORE, not COMMAND: post-bash records and looks up LAST_SEGMENT,
+            # which is this same normalised string. A different key here would mean
+            # the ledger never matched on the later pass and flake triage would be
+            # inert for a second, quieter reason.
+            flake_record "$REPO" "$CMD_CORE"
+        fi
+    else
+        echo "post-bash-failure: flake ledger missing at $FLAKE_LIB — the stamp was cleared, but this failure is NOT recorded, so a later re-run pass will read as a first pass." >&2
     fi
-else
-    echo "post-bash-failure: flake ledger missing at $FLAKE_LIB — the stamp was cleared, but this failure is NOT recorded, so a later re-run pass will read as a first pass." >&2
 fi
 
 exit 0
