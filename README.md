@@ -79,7 +79,42 @@ that route cost one explicit line, naming one exact path, is most of the defence
 and visible in the pull request. It too can be written by an agent. What it buys is that **someone
 else sees it**. Prevention is a required status check plus a human, and that needs repo admin.
 
+### Flake triage does not currently fire at all — measured 2026-09-06
+
+**Do not rely on it. The section below describes behaviour this kit cannot presently deliver, and it
+is left in place because deleting it would hide the failure rather than record it.**
+
+`post-bash.sh` learns that a suite failed by reading the `PostToolUse` hook payload. **Claude Code
+does not fire `PostToolUse` for a Bash call that exits non-zero.** Measured in one repository, two
+sole-command runs against the installed plugin:
+
+| Run | Exit | Effect |
+|---|---|---|
+| `python3 test_always_fails.py` | 1 | **nothing at all** — no `.claude/` directory created |
+| `python3 test_always_passes.py` | 0 | `.claude/` created, stamp written |
+
+The script itself is correct: fed a synthetic payload carrying `exitCode: 1`, it writes the ledger
+exactly as designed. **It is simply never called.** So no failure is ever recorded, and a re-run pass
+is indistinguishable from a first pass — the precise hole this stage was built to close.
+
+**The contradiction was already written in this file.** Above, under *the harness currently sends no
+exit code*: an inferred stamp is safe **because** `PostToolUse` does not fire for a non-zero exit.
+Stage 1 needs that premise to be **true**. Stage 3 needs it to be **false**. Both cannot hold, and
+Stage 3 was designed without checking.
+
+Every control for this stage feeds a synthetic payload containing an exit code, because that is what
+the design assumed the harness sends. The suites test the script against the payload it was written
+for, never against the payload the harness actually delivers — which is none. **400+ passing controls
+did not catch a mechanism that cannot run.**
+
+Tracked as `INC-0024`. A possible fix — recording "started" in `PreToolUse` and "completed" in
+`PostToolUse`, so a test command that started and never completed is detectable as a failure — is
+**untested and not shipped**.
+
 ### Flake triage can be walked around by narrowing the command
+
+*(This limitation is real but currently moot — see above. It applies if and when the mechanism is
+made to fire.)*
 
 `post-bash.sh` remembers a test command that **failed**, so a later pass of *the same command* is
 stamped `flaky` rather than `clean`, and the gate makes you declare it. The ledger keys on the
@@ -313,6 +348,11 @@ are **not** in force. It never fails silently into defaults.
 
 ## Flake triage
 
+> ⚠️ **NOT CURRENTLY FUNCTIONING.** `PostToolUse` does not fire for a failing Bash call, so no
+> failure is ever recorded and every stamp reads `clean`. Measured 2026-09-06, `INC-0024`. What
+> follows is the intended design and the shipped code; it is not observed behaviour. **Read the
+> limitation at the top of this file before depending on any of it.**
+
 A stamp earned on the second try is not the same as a stamp earned on the first, and until Stage 3
 the protocol could not tell them apart. Re-running until green was the cheapest route to a commit.
 
@@ -470,7 +510,7 @@ Staged, one mechanism per stage, each proven before the next.
 |---|---|---|
 | 1 | Evidence-required completion — the stamp protocol above | **shipped** |
 | 2 | Test-modification guard — hook + CI twin | **shipped** |
-| 3 | `flake-triage` — a re-run pass is a distinct state from a first pass | **shipped**, with a stated bypass |
+| 3 | `flake-triage` — a re-run pass is a distinct state from a first pass | **shipped and INERT** — `INC-0024`, cannot fire |
 | 4 | `mutation-gate` — diff-scoped, advisory | planned |
 | 5 | `severity-floor` — trivia fixed in place, never failing a gate | planned |
 
