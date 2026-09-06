@@ -148,11 +148,14 @@ that route cost one explicit line, naming one exact path, is most of the defence
 and visible in the pull request. It too can be written by an agent. What it buys is that **someone
 else sees it**. Prevention is a required status check plus a human, and that needs repo admin.
 
-### Flake triage does not currently fire at all — `INC-0024`
+### Flake triage works, and was inert for a day — `INC-0024`, closed 2026-09-07
 
-**Do not rely on it.** The section below describes the shipped code and its intended behaviour, not
-observed behaviour. It is left in place rather than deleted because deleting it would hide the
-failure instead of recording it.
+Observed end to end in a live session: a failing suite writes the ledger, a re-run pass stamps
+`flaky` rather than `clean`, and the commit is refused naming the command and both times. Both
+printed remedies were executed verbatim rather than read, and both worked.
+
+The history below is kept rather than deleted, because deleting it would hide a failure this file
+exists to record.
 
 Same root cause as `INC-0025` above: `post-bash.sh` learns a suite failed by reading a `PostToolUse`
 payload, and that event does not fire for a failing Bash call. So no failure is recorded, the ledger
@@ -167,9 +170,10 @@ designed. It is never called.
 `tool_name`, `tool_input`, `tool_use_id`, `error`, `error_type`, `is_interrupt` and `is_timeout`.
 The kit never registered for it until `0.5.0`, which adds `post-bash-failure.sh` on that event.
 
-**Shipped and observed.** A real failing suite reached the hook and cleared a real stamp on
-2026-09-06. Flake recording was then found inert for the commonest command shape and fixed
-separately — see below.
+**Shipped and fully observed as of 2026-09-07.** A real failing suite reached the hook and cleared a
+real stamp on 2026-09-06; recording was then found inert for the commonest command shape
+(`INC-0027`) and fixed, and the complete chain — fail, re-run, `flaky` stamp, refused commit,
+declaration, trailer, CI reporting it — was watched working the next day.
 
 **Why the controls did not catch it**, stated precisely because the loose version is wrong: the
 suites *do* exercise the real payload shape — `test-post-bash.sh` asserts that a payload with no exit
@@ -417,10 +421,10 @@ are **not** in force. It never fails silently into defaults.
 
 ## Flake triage
 
-> ⚠️ **NOT CURRENTLY FUNCTIONING.** `PostToolUse` does not fire for a failing Bash call, so no
-> failure is ever recorded and every stamp reads `clean`. Measured 2026-09-06, `INC-0024`. What
-> follows is the intended design and the shipped code; it is not observed behaviour. **Read the
-> limitation at the top of this file before depending on any of it.**
+> **Observed working, 2026-09-07.** Every row of the table below has been watched in a live session
+> against a genuinely flaky suite. It was inert for a day between shipping and being run — the hook
+> was subscribed to an event that never fires for failures (`INC-0024`) — which is why the
+> limitation at the top of this file is worth reading before depending on any of it.
 
 A stamp earned on the second try is not the same as a stamp earned on the first, and until Stage 3
 the protocol could not tell them apart. Re-running until green was the cheapest route to a commit.
@@ -433,7 +437,7 @@ ordinary debugging would be switched off, so it doesn't.
 |---|---|---|
 | suite passed first time | `clean` | allowed, silently |
 | suite failed → **you edited something** → passed | `clean` | allowed, silently |
-| suite failed → re-ran it → passed | *intended* **`flaky`** | *intended* **refused** — currently reads `clean` and is allowed, `INC-0024` |
+| suite failed → re-ran it → passed | **`flaky`** | **refused** — observed 2026-09-07 |
 | …and you declared it | `flaky` | **still refused** — see below |
 | …and the commit carries a `Flaky:` trailer | `flaky` | allowed, and the gate names the issue |
 
@@ -463,8 +467,7 @@ git commit -m "..." --trailer "Flaky: npm test #412 races on the token clock"
 
 **`--trailer`, not a line typed into the message.** Git parses trailers only from the *final
 paragraph*, so a `Flaky:` line with any paragraph after it records **zero** trailers while looking
-perfect in `git log`. Both halves are written to refuse that case rather than silently reading it as
-clean; the CI half does so today, the hook half cannot fire at all (`INC-0024`).
+perfect in `git log`. Both halves refuse that case rather than silently reading it as clean.
 
 ### The CI half, and what it cannot do
 
@@ -478,8 +481,7 @@ their own check rather than buried. Exit `0` clean, `1` malformed, `3` could-not
 
 **It cannot detect a *missing* trailer, and never will.** By the time CI runs, the stamp that knew
 the run was flaky is gone — nothing in the repository records that a commit was made under one. Only
-the hook can require it, at the moment the stamp still exists — and the hook is the half that is
-currently inert, so in practice nothing requires it (`INC-0024`).
+the hook can require it, at the moment the stamp still exists — and it does, observed 2026-09-07.
 
 This is weaker than the test guard's CI half, which *can* catch an undeclared change because the
 change is sitting in the diff. The two are not equivalent and this file will not imply they are.
@@ -589,7 +591,7 @@ what is *observed*, not what was intended.
 |---|---|---|
 | 1 | Evidence-required completion — the stamp protocol above | **shipped**; fail-open `INC-0025` fixed and observed |
 | 2 | Test-modification guard — hook + CI twin | **shipped** |
-| 3 | `flake-triage` — a re-run pass is a distinct state from a first pass | **shipped**; `INC-0024` fixed, recording observed |
+| 3 | `flake-triage` — a re-run pass is a distinct state from a first pass | **shipped and observed**; bypass stated below |
 | 4 | `mutation-gate` — diff-scoped, advisory | planned |
 | 5 | `severity-floor` — trivia fixed in place, never failing a gate | planned |
 
