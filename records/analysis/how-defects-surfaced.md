@@ -16,9 +16,10 @@ the severe ones were found by **running the software** — usually within minute
 always while a large control suite was green.
 
 **How to read the count.** **24 defects is not a measure of how broken this code is.** It is a
-measure of how hard it was looked at, by an author logging his own mistakes as carefully as the
-code's — a merged conflict marker and a self-inflicted regression are both in here. A project that
-recorded less would look better and be worse. Read the *proportions*, not the total.
+measure of how hard it was looked at, and of a project that logs the mistakes made *while building
+it* as carefully as the ones found *in it*. Several entries are the agent's own errors, not the
+code's: a merged conflict marker, a self-inflicted regression, a diagnosis that turned out wrong.
+A project recording less would look better and be worse. Read the *proportions*, not the total.
 
 **What it cannot tell you.** Anything about other people, other machines, or whether any of this
 stops reward hacking — which is what the kit is for, and which no event here tests. The limits are
