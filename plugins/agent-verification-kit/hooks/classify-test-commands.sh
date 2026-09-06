@@ -61,17 +61,35 @@
 # ---------------------------------------------------------------------------
 
 SUITE_SCRIPT='((tests?|checks?)([-_][A-Za-z0-9._-]*)?|[A-Za-z0-9._-]*[-_](tests?|checks?))\.(sh|bash|zsh|py|js|mjs|cjs|ts|rb|pl)([[:space:]"'"'"']|$)'
-# THE RUNNER LIST NEEDS ITS OWN TRAILING BOUNDARY, and did not have one until
-# 2026-09-06. `grep -E` searches, so every bare alternative matched as a PREFIX of
-# a longer word: `pytest` inside `pytest-other`, `npm test` inside `npm testing`,
-# `go test` inside `go testdata`. Measured against the shipped hook — a successful
-# `pytest-other` wrote a pass stamp, a 30-minute commit unlock earned by a command
-# that ran no suite. Exactly the defect `([[:space:]"']|$)` already fixed for
-# SUITE_SCRIPT's extensions, in the half of the pattern nobody re-read.
-# Found by cross-vendor review of the PostToolUseFailure hook, not by these
-# controls, which had no case for it.
-TEST_RUNNER='(npm\s+(test|run\s+test[s]?|run\s+build|run\s+check|run\s+lint)|npx\s+(vitest|jest|playwright)|pytest|py\.test|python3?\s+-m\s+(unittest|pytest)|go\s+test|cargo\s+test|cargo\s+build|dotnet\s+test|dotnet\s+build|make\s+test|make\s+check|bun\s+test|bun\s+run\s+test|pnpm\s+(test|run\s+test)|yarn\s+test|gradle\s+test|mvn\s+test)'
-TEST_PATTERN='('"$TEST_RUNNER"'([[:space:]"'"'"']|$)|'"$SUITE_SCRIPT"')'
+# NO TRAILING BOUNDARY ON THE RUNNER LIST, AND THAT IS A KNOWN DEFECT — not an
+# oversight, and not fixed here, because the obvious fix is worse.
+#
+# `grep -E` searches, so every bare alternative matches as a PREFIX of a longer
+# word: `pytest` inside `pytest-other`, `npm test` inside `npm testing`. A
+# successful `pytest-other` therefore writes a pass stamp for a command that ran no
+# suite. Real, and recorded.
+#
+# ADDING `([[:space:]"'"'"']|$)` AFTER THE GROUP WAS TRIED ON 2026-09-06 AND
+# REVERTED WITHIN THE HOUR. It broke three legitimate forms and did not close the
+# hole:
+#
+#   npm run test:unit   STOPPED MATCHING — a `:` suffix is not a boundary, and this
+#                       is one of the most common test commands there is
+#   make test-all       STOPPED MATCHING — same shape, a suffixed target
+#   pytest>out.log      STOPPED MATCHING — redirection without a space, which
+#                       post-bash explicitly supports
+#   pytest""-other      STILL MATCHED — the shell concatenates the fragments into
+#                       `pytest-other`, and a quote had been put IN the boundary
+#                       class, so the very hole being closed stayed open
+#
+# None of the 168 controls in test-post-bash.sh caught the regression, because none
+# of them runs `npm run test:unit`. That gap is the more useful finding.
+#
+# The correct fix distinguishes a script-name suffix (`test:unit`, `test-all`) from
+# an unrelated longer word (`testing`, `pytest-other`), which needs per-alternative
+# rules rather than one trailing class. It belongs in its own change with its own
+# controls, not bundled into a hook fix. Tracked; the false positive it leaves is a
+# command nobody runs by accident.
 
 # WHAT MAY PRECEDE THE SUITE. Env assignments and a small set of wrappers — and
 # NO FLAGS. Shared with post-bash.sh from 2026-09-06 so post-bash-failure.sh cannot
@@ -102,3 +120,4 @@ TEST_PATTERN='('"$TEST_RUNNER"'([[:space:]"'"'"']|$)|'"$SUITE_SCRIPT"')'
 # needs per-wrapper flag semantics, and being wrong in the permissive direction
 # costs a false green.
 RUN_LEAD='^[[:space:]]*(([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*|env|time|nohup|sudo|command|exec|bash|sh|zsh|python3?|node|bun|deno|ruby|perl)[[:space:]]+)*["'"'"']?([^[:space:]]*/)?'
+TEST_PATTERN='(npm\s+(test|run\s+test[s]?|run\s+build|run\s+check|run\s+lint)|npx\s+(vitest|jest|playwright)|pytest|py\.test|python3?\s+-m\s+(unittest|pytest)|go\s+test|cargo\s+test|cargo\s+build|dotnet\s+test|dotnet\s+build|make\s+test|make\s+check|bun\s+test|bun\s+run\s+test|pnpm\s+(test|run\s+test)|yarn\s+test|gradle\s+test|mvn\s+test|'"$SUITE_SCRIPT"')'
