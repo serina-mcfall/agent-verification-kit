@@ -81,11 +81,17 @@ Code actually fires when a tool call fails, and the one this kit had never regis
 test command now clears the stamp; an interrupted or timed-out one does not, because those tell you
 nothing about the code.
 
-**Not yet observed working in a live session.** Hooks are fixed at session start, so the fix cannot
-be exercised in the session that wrote it. Until someone runs a failing suite against `0.5.0` and
-watches the stamp go, treat the paragraph above as still true for your installation: **a green gate
-proves some recognised test command passed within 30 minutes and nothing has been edited since** — no
-more than that. The trial record keeps this at `fix`, not `keep`, until that run happens.
+**Observed working, 2026-09-06.** In a live session with the plugin installed:
+
+```
+python3 test_passes.py   → stamp written
+python3 test_fails.py    → stamp CLEARED
+```
+
+Correcting an earlier claim in this file: **hooks are not fixed at session start.** `/reload-plugins`
+took the hook count from 7 to 8 and the new hook fired immediately. What does *not* reload mid-session
+is a hook added to `settings.json` — that distinction cost an afternoon of believing the fix was
+untestable.
 
 **Four shapes it still does not clear on**, each a deliberate choice with the reasoning recorded in
 `post-bash-failure.sh`:
@@ -161,8 +167,9 @@ designed. It is never called.
 `tool_name`, `tool_input`, `tool_use_id`, `error`, `error_type`, `is_interrupt` and `is_timeout`.
 The kit never registered for it until `0.5.0`, which adds `post-bash-failure.sh` on that event.
 
-**Shipped, not yet observed.** The same session-start constraint applies: nothing has yet watched a
-real failure reach the new hook. The trial verdict stays `fix`.
+**Shipped and observed.** A real failing suite reached the hook and cleared a real stamp on
+2026-09-06. Flake recording was then found inert for the commonest command shape and fixed
+separately — see below.
 
 **Why the controls did not catch it**, stated precisely because the loose version is wrong: the
 suites *do* exercise the real payload shape — `test-post-bash.sh` asserts that a payload with no exit
@@ -580,9 +587,9 @@ what is *observed*, not what was intended.
 
 | Stage | Mechanism | State |
 |---|---|---|
-| 1 | Evidence-required completion — the stamp protocol above | **shipped**; fail-open `INC-0025` fixed in 0.5.0, unobserved |
+| 1 | Evidence-required completion — the stamp protocol above | **shipped**; fail-open `INC-0025` fixed and observed |
 | 2 | Test-modification guard — hook + CI twin | **shipped** |
-| 3 | `flake-triage` — a re-run pass is a distinct state from a first pass | **shipped**; `INC-0024` fixed in 0.5.0, unobserved |
+| 3 | `flake-triage` — a re-run pass is a distinct state from a first pass | **shipped**; `INC-0024` fixed, recording observed |
 | 4 | `mutation-gate` — diff-scoped, advisory | planned |
 | 5 | `severity-floor` — trivia fixed in place, never failing a gate | planned |
 
