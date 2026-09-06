@@ -541,3 +541,82 @@ append-only and a verdict that changed is more informative than a verdict that w
   --field ci_seconds=0 --field false_positives=0 --field true_positives=1 \
   --doc records/trials/1-evidence-required-completion.md
 ```
+
+---
+
+## Addendum — the stamp survives a failing test run, 2026-09-06
+
+**`INC-0025`, high. This verdict was `keep`. The mechanism has a fail-open and it is shipped.**
+
+### What was measured
+
+One repository, against the installed `0.4.0` plugin, each command the sole call in its tool call:
+
+| Step | Result |
+|---|---|
+| `python3 test_always_passes.py` | exit 0 → stamp written, `…|inferred|clean` |
+| `python3 test_always_fails.py` | exit 1 → **stamp untouched** |
+| a commit | **ALLOWED**, produced `913d2f9` |
+
+`verify-gate` behaved exactly as specified: a fresh stamp existed, so it opened the gate. The defect
+is upstream of it — **the stamp should not have been there.**
+
+### The cause is a branch that has never run
+
+`post-bash.sh:501` prints *"Tests/build FAILED or unreadable (exit …). Stamp cleared. Fix issues
+before committing."*
+
+That branch requires a non-zero exit code in the payload. **Claude Code does not fire `PostToolUse`
+for a Bash call that exits non-zero**, so the hook is never invoked and the branch is dead code in
+the real harness. Failure handling was written, covered by controls, reviewed, shipped, and has never
+executed once.
+
+Same root cause as `INC-0024`. One discovery, two defects, and this is the more serious of them:
+Stage 3 being inert means a mechanism does not help, while this means the flagship mechanism permits
+a commit after a red suite.
+
+### It is not a contrived sequence
+
+It does not require running the same command twice. `npm test` passes and stamps; `npm run
+test:integration` fails and clears nothing; the commit proceeds on the first suite's stamp while the
+second is red. Two suites in one session is ordinary.
+
+### What still protects a user, stated because it is not nothing
+
+- **Any file edit clears the stamp**, so the ordinary edit → test → commit loop is unaffected. This
+  is the mitigation that matters most, and it is why the defect survived a stage-1 trial: the trial
+  exercised edit-then-test, not pass-then-fail.
+- The stamp **expires after 30 minutes**.
+- The stamp **records which command earned it**, so a reader who checks can see the gate naming a
+  suite other than the one that just failed.
+
+The exposed window is a passing run followed by a failing run with no edit between, inside 30
+minutes.
+
+### What this costs this trial's verdict
+
+| Field | Was | Now |
+|---|---|---|
+| verdict | `keep` | **`fix`** — named defect `INC-0025` |
+| `false_positives` | 0 | 0 |
+| `true_positives` | 0 | 0 |
+| live sessions observed | 1 | **2** — and the second found a fail-open the first did not |
+
+**`keep` was awarded on evidence that was real and incomplete.** Stage 1's Addendum 2 observed the
+hooks firing from `${CLAUDE_PLUGIN_ROOT}`, a refusal, and a release — all true, all still true. Not
+one probe ran a **failing** test command and then attempted a commit. The trial tested that the gate
+closes and opens; it never tested that a failure *shuts* it.
+
+That is the gap worth carrying into every later stage: **a mechanism's happy path and its refusal
+path are not its whole behaviour.** The third path — what happens when the thing being verified
+fails — was documented in the code and never exercised against the harness.
+
+### The fix
+
+A `PostToolUseFailure` hook, matcher `Bash`, clearing the stamp on a genuine failure. The harness's
+`/hooks` screen states the payload carries `tool_name`, `tool_input`, `tool_use_id`, `error`,
+`error_type`, `is_interrupt` and `is_timeout` — so an interrupted or timed-out call can be excluded
+rather than treated as a failure.
+
+Not shipped at the time of writing. **The verdict stays `fix` until a live session shows a failing
+run clearing the stamp and the subsequent commit being refused.**

@@ -533,15 +533,21 @@ Stage 3 was designed. Nobody checked. I did not check.
 
 ### Why 512 controls did not catch it
 
-Every control for this stage feeds a synthetic payload containing an exit code, because that is what
-the design assumed the harness sends. **The suites test the script against the payload it was
-written for, never against the payload the harness actually delivers — which is none.**
+The loose version of this — "every control feeds a payload containing an exit code" — is **wrong**,
+and a reviewer checked it. `test-post-bash.sh` explicitly exercises the real payload shape, asserting
+that a payload with **no** exit code still stamps, on the stated grounds that *"the hook ran, so the
+command passed"*. Interrupted payloads are covered too.
 
-This is the seventh instance of the project's recurring defect, and the largest: not a control that
-cannot fail, but an entire mechanism whose controls all pass while it cannot run. The end-to-end run
-in the main body of this trial has the same flaw — it drives the hooks with hand-built payloads. It
-proved the scripts implement the design. It could not, and did not, prove the design meets the
-harness.
+The actual gap is narrower and worse. **No control establishes which events the harness emits and
+routes.** Every control supplies a payload; not one asks whether that payload ever arrives. A
+mechanism can be completely covered against the input it was written for and never receive it.
+
+That also means the premise was not merely unexamined — it was *written into a control's assertion
+text* and relied upon, while a second mechanism was built one directory away requiring its opposite.
+
+The end-to-end run in the main body of this trial shares the flaw: it drives the hooks with
+hand-built payloads. It proved the scripts implement the design. It could not, and did not, prove the
+design meets the harness.
 
 ### What this costs the earlier verdicts
 
@@ -549,19 +555,39 @@ harness.
   never been observed. They have now, and they do not work.
 - **`REV-0011` is superseded.** `blocked` → `fix`: there is a named defect, not merely an unrun test.
 - `REV-0010`, the CI half's `keep`, **stands.** `check-flaky-trailers.sh` validates trailers that
-  exist and is unaffected — though with the hook half inert, nothing will ever produce a `Flaky:`
-  trailer to validate, so it is a correct mechanism guarding an empty road.
+  exist and is unaffected. What the hook half's failure removes is the *automatic* pressure to add
+  one — a human or an agent can still write a `Flaky:` trailer by hand, and PR #6 contains real
+  ones. The validator is useful independently of whether anything compels its input.
 - **Command narrowing, this trial's headline limitation, is currently moot.** It describes a bypass
   around a gate that does not close.
 
-### A possible fix, untested
+### The fix, identified after this addendum was first written
 
-`PreToolUse` fires on every Bash call. Recording *command started* there and *command completed* in
-`PostToolUse` would make a test command that started and never completed detectable as a failure —
-turning the harness's silence into the signal rather than fighting it.
+**Superseded correction.** This addendum originally proposed recording *command started* in
+`PreToolUse` and *completed* in `PostToolUse`, inferring failure from a missing completion. A
+cross-vendor review (Codex, 2026-09-06) refuted that design: permission denial, long-running and
+concurrent commands, background execution, overlapping identical commands, multiple sessions sharing
+a repository, and edits between the two events all look identical to a failure. Missing completion
+means **unknown**, not **failed**. The proposal is not sound and is withdrawn.
 
-**Not tested, not shipped, and it needs answers first:** what happens to an interrupted call, a
-session that ends mid-run, or a command the user cancels. Each would look identical to a failure.
+The same review found what the diagnosis had missed. **Claude Code fires `PostToolUseFailure` after a
+tool call fails.** The kit never registered for it. Confirmed against the documentation and against
+the harness's own `/hooks` screen, which states the payload:
+
+> Input to command is JSON with `tool_name`, `tool_input`, `tool_use_id`, `error`, `error_type`,
+> `is_interrupt`, and `is_timeout`.
+
+Two properties matter. There is **no exit code** — the event firing *is* the failure signal, so
+nothing needs inferring. And `is_interrupt` and `is_timeout` are **separate fields**, which answers
+the strongest objection to the withdrawn design: an interrupted or timed-out call is distinguishable
+from a real test failure rather than guessed at.
+
+So this is an **event-subscription mistake, not a limit of the harness**, and it is cheap to fix.
+
+**Still not observed.** Hooks are fixed at session start, so a probe registered mid-session cannot
+fire. The field list above is the harness describing its own contract, which is stronger than the
+assumption that produced `INC-0024` but is **not a captured payload**. A probe is armed to capture
+one, and no control should claim conformance to the real shape until it has.
 
 ### Revised numbers
 
@@ -580,5 +606,5 @@ session that ends mid-run, or a command the user cancels. Each would look identi
 | `check-flaky-trailers.sh` (CI) | **`keep`** | unchanged, `REV-0010` |
 | the hooks | **`fix`** | **`blocked` → `fix` 2026-09-06.** Named defect: `INC-0024` |
 
-**Nothing about this is close to `keep`.** The stage is shipped, public, and inert, and the README
-now says so at the top rather than at the bottom.
+The hook half is shipped, public and inert, and the README now says so at the top rather than the
+bottom. The CI half's `keep` is unaffected and is not being revoked by association.
