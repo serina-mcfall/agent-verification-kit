@@ -110,3 +110,47 @@ precisely the class of defect this programme exists to catch.
 
 Workaround used, and worth keeping: because scripts *are* live, moving probe logic into a script
 that is already registered reaches every event with no reload and nothing asked of the human.
+
+---
+
+## Addendum 1 — the channel question, answered on the fourth attempt
+
+**Recorded `NOTE-0032`.** The section above says Run 1 did not settle whether any hook output
+channel is displayed to a human. A fourth round settled it.
+
+**Method, and the reason it is trustworthy where three earlier rounds were not.** Six nonces were
+emitted in one round — three channels across `PreToolUse` and `PostToolUse`. The agent did not
+read, print, or know any token before Serina reported. The only route from hook to human was the
+channel itself.
+
+**Result.** She reported exactly two of the six, and both were channel A, `systemMessage`, one from
+each event. Plain stdout and stderr were emitted on both events and neither arrived.
+
+| Channel | `PreToolUse` | `PostToolUse` |
+|---|---|---|
+| A — `systemMessage` (JSON on stdout) | **displayed** | **displayed** |
+| B — plain stdout, exit 0 | not displayed | not displayed |
+| C — stderr, exit 0 | not displayed | not displayed |
+
+**The selectivity is the evidence.** Two of six, both the same channel, drawn from a set the
+reporter could not see in advance.
+
+The surfaced form is attributed to its origin: `PreToolUse:Bash says: <text>`.
+
+**This confirms `research/claude-code-hook-output-channels.md`** (2026-09-04), which said from
+documentation that plain stdout and stderr at exit 0 reach the debug log and never the transcript.
+Its one open question — whether `PreToolUse` honours `systemMessage` — is now closed by measurement
+rather than by reading.
+
+**It also corrects an inference made earlier in this same trial.** The structural finding above
+notes channel A landing in `attachment.stdout` and reads that as the JSON form not being honoured.
+That was wrong. It is recorded as stdout *and* surfaced. Presence in the transcript says nothing
+either way about display — which is the distinction this trial was arguing at the time, and then
+failed to apply to its own reading.
+
+**Consequence for this mechanism.** `mutation-gate` can ship advisory and actually be read. The
+roadmap entry survives its first design risk.
+
+**Consequence for `INC-0013` and `INC-0016`.** Both stay open, because nothing is fixed yet. But
+they stop being research. `guard-test-changes.sh`, `verify-gate.sh` and `post-bash.sh` announce on
+stdout or stderr — the two channels that reach nobody — while `systemMessage` worked the whole time.
