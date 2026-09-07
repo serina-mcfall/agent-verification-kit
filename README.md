@@ -117,6 +117,14 @@ countermeasure for that, and it is not in this kit yet (see *Roadmap*).
 
 `verify-gate.sh` reports this to you at the moment it unlocks a commit, rather than hiding it.
 
+**That sentence was false until 0.6.0, and this paragraph is here so the correction is not silent.**
+The gate did say it — on plain stdout at exit 0, which `NOTE-0032` measured as reaching nobody. The
+disclosure existed, was correct, and was delivered to the void, under a comment in the source reading
+`# SAY WHAT AUTHORISED IT, at the moment it is relied upon`. `INC-0013` is named for exactly that.
+Since 0.6.0 every allow-path disclosure and every fail-open warning goes through `announce.sh`, which
+emits a `systemMessage` — the one channel observed reaching a human on both `PreToolUse` and
+`PostToolUse`. Refusals were already visible and are unchanged.
+
 An inferred stamp rests on the premise that `PostToolUse` does not fire for a non-zero exit, so the
 hook running at all means the command succeeded. **That premise is correct**, and it is what makes
 inferring success sound.

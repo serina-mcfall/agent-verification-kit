@@ -1,6 +1,14 @@
 #!/bin/bash
 # PostToolUse hook on Edit/Write: clears verification stamp and nudges after repeated edits
 
+# announce() puts a message on the ONE channel NOTE-0032 observed reaching a
+# human. Sourced defensively: if the library is missing this hook keeps working
+# and falls back to the old stderr behaviour, because a verification hook that
+# breaks over a missing MESSAGE FORMATTER would be a worse defect than the
+# silence being fixed.
+ANNOUNCE_LIB="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/announce.sh"
+if [ -r "$ANNOUNCE_LIB" ]; then . "$ANNOUNCE_LIB"; else announce() { printf '%s\n' "$*" >&2; }; fi
+
 INPUT=$(cat)
 # Claude Code delivers the hook payload on a SOCKET. `cat /dev/stdin` opens fd 0
 # BY PATH, and a socket cannot be opened by path — it fails with ENXIO ("No such
@@ -14,7 +22,7 @@ INPUT=$(cat)
 # An empty payload is never normal; say so on stderr, which is visible without
 # blocking the tool.
 if [ -z "$INPUT" ]; then
-  echo "edit-tracker: empty payload — this hook cannot see the tool call and is not enforcing." >&2
+  announce "edit-tracker: empty payload — this hook cannot see the tool call and is not enforcing."
 fi
 TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
 
@@ -104,11 +112,11 @@ if [ -r "$STAMP_LIB" ]; then
     else
         # No path in the payload is not normal — say so rather than silently
         # clearing the wrong stamp, following this file's empty-payload precedent.
-        echo "edit-tracker: no file_path in payload — falling back to the session-root stamp." >&2
+        announce "edit-tracker: no file_path in payload — falling back to the session-root stamp."
         VERIFIED=$(stamp_path_for)
     fi
 else
-    echo "edit-tracker: stamp resolver missing at $STAMP_LIB — clearing the old shared path." >&2
+    announce "edit-tracker: stamp resolver missing at $STAMP_LIB — clearing the old shared path."
     VERIFIED="$PROJECT_DIR/.claude/.verified"
 fi
 
@@ -151,7 +159,7 @@ else
     # Soft, like everything else in this hook: it runs after the tool and cannot
     # block. A stale ledger causes a false FLAKY later, which the gate reports
     # and a human can clear — worse than correct, better than silent.
-    echo "edit-tracker: flake ledger missing at $FLAKE_LIB — a recorded failure will not be forgotten by this edit, so a later pass may report flaky. NOT enforcing correctly." >&2
+    announce "edit-tracker: flake ledger missing at $FLAKE_LIB — a recorded failure will not be forgotten by this edit, so a later pass may report flaky. NOT enforcing correctly."
 fi
 
 # Increment edit counter

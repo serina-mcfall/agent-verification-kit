@@ -40,6 +40,18 @@
 # this kit's own history warns about.
 # ---------------------------------------------------------------------------
 
+# announce() puts a message on the ONE channel NOTE-0032 observed reaching a
+# human. Sourced defensively: if the library is missing this hook keeps working
+# and falls back to the old stderr behaviour, because a verification hook that
+# breaks over a missing MESSAGE FORMATTER would be a worse defect than the
+# silence being fixed.
+#
+# THE REFUSAL PATH IS NOT ROUTED THROUGH IT. This hook's block message is raw
+# text on stderr at exit 2, which reaches a human already and is observed doing
+# so. Control 4 of test-announce.sh exists to catch anyone changing that.
+ANNOUNCE_LIB="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/announce.sh"
+if [ -r "$ANNOUNCE_LIB" ]; then . "$ANNOUNCE_LIB"; else announce() { printf '%s\n' "$*" >&2; }; fi
+
 INPUT=$(cat)
 # Claude Code delivers the hook payload on a SOCKET. `cat /dev/stdin` opens fd 0 by
 # path, which a socket cannot do — it fails with ENXIO, and $(...) captures only
@@ -47,7 +59,7 @@ INPUT=$(cat)
 # sibling hook enforced nothing FOR MONTHS, silently. Plain `cat` reads the
 # already-open descriptor. Verified 2026-08-03 in this kit's ancestor.
 if [ -z "$INPUT" ]; then
-    echo "test-guard: empty payload — this hook cannot see the tool call and is NOT enforcing." >&2
+    announce "test-guard: empty payload — this hook cannot see the tool call and is NOT enforcing."
     exit 0
 fi
 
@@ -62,7 +74,7 @@ if ! command -v jq >/dev/null 2>&1; then
     #
     # Fail-closed is right for the act being guarded. It is wrong for every act that
     # merely passes nearby.
-    echo "test-guard: jq is not installed, so the tool payload cannot be parsed — this hook is NOT enforcing. Install jq to enable it." >&2
+    announce "test-guard: jq is not installed, so the tool payload cannot be parsed — this hook is NOT enforcing. Install jq to enable it."
     exit 0
 fi
 
@@ -140,7 +152,7 @@ if [ -z "$TARGET" ]; then
     # NotebookEdit: the key was never absent, it was never the one being read.
     # A message that names the wrong cause sends the reader looking in the wrong
     # place, which is how a systematic gap survives as background noise.
-    echo "test-guard: $TOOL carried neither .tool_input.file_path nor .tool_input.notebook_path — cannot classify it, so this call is allowed and the hook is NOT enforcing on it." >&2
+    announce "test-guard: $TOOL carried neither .tool_input.file_path nor .tool_input.notebook_path — cannot classify it, so this call is allowed and the hook is NOT enforcing on it."
     exit 0
 fi
 
@@ -171,7 +183,7 @@ if [ ! -r "$PATTERNS_LIB" ]; then
             echo "(it lives beside this script), then retry." >&2
             exit 2 ;;
     esac
-    echo "test-guard: classifier missing at $PATTERNS_LIB — this path is not test-shaped by name, so the call is allowed, but the hook is NOT enforcing." >&2
+    announce "test-guard: classifier missing at $PATTERNS_LIB — this path is not test-shaped by name, so the call is allowed, but the hook is NOT enforcing."
     exit 0
 fi
 # shellcheck source=/dev/null
@@ -208,13 +220,13 @@ CLASS=$(avk_classify_path "$REL" "$REPO")
 # ---------------------------------------------------------------------------
 DECL_DIR="${REPO:-${CLAUDE_PROJECT_DIR:-.}}"
 DECL="$DECL_DIR/.claude/.test-change"
-[ -n "$REPO" ] || echo "test-guard: no git repository resolves from '$TARGET' — using $DECL for the declaration." >&2
+[ -n "$REPO" ] || announce "test-guard: no git repository resolves from '$TARGET' — using $DECL for the declaration."
 
 DECL_LINE=""
 if [ -f "$DECL" ]; then
     AGE=$(( $(date +%s) - $(stat -c %Y "$DECL" 2>/dev/null || echo 0) ))
     if [ "$AGE" -gt 1800 ]; then
-        echo "test-guard: $DECL is $(( AGE / 60 ))m old (stale after 30m) — treating it as absent." >&2
+        announce "test-guard: $DECL is $(( AGE / 60 ))m old (stale after 30m) — treating it as absent."
     else
         # PREFIX MATCH: the line either IS the path, or is the path followed by
         # whitespace. Both patterns are QUOTED, so the path is matched literally —
@@ -255,9 +267,9 @@ if [ -n "$DECL_LINE" ]; then
     reason=${DECL_LINE#"$REL"}
     reason=${reason#"${reason%%[![:space:]]*}"}
     if [ -n "$reason" ]; then
-        echo "test-guard: $CLASS change to $REL is declared — \"$reason\". Allowed."
+        announce "test-guard: $CLASS change to $REL is declared — \"$reason\". Allowed."
     else
-        echo "test-guard: $CLASS change to $REL is declared, with no reason given. Allowed."
+        announce "test-guard: $CLASS change to $REL is declared, with no reason given. Allowed."
     fi
     exit 0
 fi

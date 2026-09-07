@@ -23,3 +23,4 @@ test-check-flaky-trailers.sh
 test-check-plugin-version.sh
 test-check-record.sh
 test-post-bash-failure.sh
+test-announce.sh
