@@ -140,6 +140,44 @@ The measurement covers one terminal on one machine. The documentation's hedge su
 render everywhere. Nothing here should *remove* the stderr write; ideally a message goes to both, so
 the debug log keeps what it always had.
 
+---
+
+## Observed — Run 2, `NOTE-0033`
+
+`0.6.0` installed from its own GitHub marketplace, then `check-controls.sh` run as a real Bash tool
+call. Serina reported, unprompted as to wording:
+
+    PostToolUse:Bash says: VERIFICATION STAMP: Tests/build passed (exit code INFERRED — the
+    payload carried none). Commit gate unlocked.
+
+**Why that is evidence and not another leading question.** This turn the agent quoted only the short
+form of the message. She reported the `INFERRED` variant, and the stamp file independently recorded
+`basis=inferred`. Her report matches the machine, not the prompt — the failure mode `NOTE-0031`
+records three times over.
+
+**The hook definitely fired**: a stamp was written 13 seconds before the check. Round 2 of the
+channel probe proved that "no output" and "no hook" are different things, and that control is why
+this run means anything.
+
+### Concern 1 was wrong, and it is corrected rather than quietly dropped
+
+The concern above says two hooks on one event might both announce and one might win. **The matchers
+are disjoint** — `verify-gate` and `post-bash` fire on `Bash`; `guard-test-changes` and
+`edit-tracker` on `Edit|Write|MultiEdit|NotebookEdit`. No single tool call fires two announcing
+hooks from this plugin, so the shared-file variant was never needed. It becomes reachable only if a
+second announcing hook is added to the same matcher, or one is registered in `settings.json`.
+
+### What Run 2 did NOT reach
+
+- **`verify-gate`'s allow path**, which is `INC-0013`'s actual site. It fires on a commit.
+- **`INC-0016`'s site**, the flake-ledger fail-open warning. Firing it needs the library made
+  unreadable, which means renaming a file inside the installed plugin cache — **the harness refused
+  that action, and it was not worked around.** The incident stays open on that basis, even though
+  its root cause is fixed and the shared mechanism is now observed.
+- **`INC-0032` narrows.** The cache *did* refresh here: `0.6.0` was copied and its `post-bash`
+  sources `announce.sh`. That incident's failure was a **local directory** marketplace; a GitHub
+  marketplace plus a version bump refreshed correctly.
+
 ## Not in this change
 
 `INC-0026`'s resolver, and the fourth field of the stamp. Both are separately open, and bundling
