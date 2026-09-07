@@ -1,6 +1,14 @@
 #!/bin/bash
 # PostToolUse hook on Bash: creates verification stamp on test/build pass, tracks elapsed time
 
+# announce() puts a message on the ONE channel NOTE-0032 observed reaching a
+# human. Sourced defensively: if the library is missing this hook keeps working
+# and falls back to the old stderr behaviour, because a verification hook that
+# breaks over a missing MESSAGE FORMATTER would be a worse defect than the
+# silence being fixed.
+ANNOUNCE_LIB="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/announce.sh"
+if [ -r "$ANNOUNCE_LIB" ]; then . "$ANNOUNCE_LIB"; else announce() { printf '%s\n' "$*" >&2; }; fi
+
 INPUT=$(cat)
 # Claude Code delivers the hook payload on a SOCKET. `cat /dev/stdin` opens fd 0
 # BY PATH, and a socket cannot be opened by path — it fails with ENXIO ("No such
@@ -14,7 +22,7 @@ INPUT=$(cat)
 # An empty payload is never normal; say so on stderr, which is visible without
 # blocking the tool.
 if [ -z "$INPUT" ]; then
-  echo "post-bash: empty payload — this hook cannot see the tool call and is not enforcing." >&2
+  announce "post-bash: empty payload — this hook cannot see the tool call and is not enforcing."
 fi
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 
@@ -41,7 +49,7 @@ if [ -r "$STAMP_LIB" ]; then
     # verb is passed — see stamp-path.sh on why the -C form requires one.
     VERIFIED=$(stamp_path_for "$(stamp_target_dir_from_command "$COMMAND")")
 else
-    echo "post-bash: stamp resolver missing at $STAMP_LIB — stamping the old shared path; the commit gate will not find it." >&2
+    announce "post-bash: stamp resolver missing at $STAMP_LIB — stamping the old shared path; the commit gate will not find it."
     VERIFIED="$PROJECT_DIR/.claude/.verified"
 fi
 mkdir -p "$PROJECT_DIR/.claude"
@@ -63,7 +71,7 @@ if [ -r "$FLAKE_LIB" ]; then
     # shellcheck source=/dev/null
     . "$FLAKE_LIB" && FLAKE_OK=yes
 fi
-[ "$FLAKE_OK" = yes ] || echo "post-bash: flake ledger missing at $FLAKE_LIB — a re-run after a failure cannot be told from a first pass, so flake detection is NOT enforcing." >&2
+[ "$FLAKE_OK" = yes ] || announce "post-bash: flake ledger missing at $FLAKE_LIB — a re-run after a failure cannot be told from a first pass, so flake detection is NOT enforcing."
 
 # The repository whose ledger is at stake is the one whose stamp is at stake, so
 # it is derived from VERIFIED rather than resolved a second time. Two resolutions
@@ -90,7 +98,7 @@ else
     # FAIL LOUD AND STAMP NOTHING. Without the pattern this hook cannot tell a test
     # run from any other command, and the safe direction is to write no stamp at
     # all rather than to guess in either direction.
-    echo "post-bash: command classifier missing at $COMMANDS_LIB — no stamp can be written, because nothing here can tell a test run from any other command." >&2
+    announce "post-bash: command classifier missing at $COMMANDS_LIB — no stamp can be written, because nothing here can tell a test run from any other command."
     exit 0
 fi
 
@@ -385,8 +393,8 @@ if echo "$COMMAND" | grep -qEi "$TEST_PATTERN"; then
         # Deliberately neither stamps nor clears: this run says nothing about the
         # suite either way, and destroying a good stamp because someone piped a
         # command would be its own annoyance.
-        echo "VERIFICATION: a test command ran, but the exit code describes the whole line, not the test."
-        echo "  Not stamping. Run the suite as the only command (no pipe, nothing after it) to verify."
+        announce "VERIFICATION: a test command ran, but the exit code describes the whole line, not the test.
+  Not stamping. Run the suite as the only command (no pipe, nothing after it) to verify."
     elif [ "$EXIT_CODE" = "0" ] && [ "$INTERROGATION" = yes ]; then
         # ORDER IS THE WHOLE CORRECTNESS OF THIS BRANCH, and the first draft had it
         # wrong. Testing INTERROGATION before the exit code made "not a run" swallow
@@ -399,8 +407,8 @@ if echo "$COMMAND" | grep -qEi "$TEST_PATTERN"; then
         # So this branch is reached only when the command SUCCEEDED. A non-zero exit
         # falls through to the clear below exactly as it always did, and the message
         # can now say "it exits 0" because reaching here proves it.
-        echo "VERIFICATION: that command asks the runner ABOUT itself (--help, --version, --collect-only, -list and similar). It is not a run, and it exits 0."
-        echo "  Not stamping, and not clearing: a help screen is not evidence about the suite in either direction. Run the suite itself to verify."
+        announce "VERIFICATION: that command asks the runner ABOUT itself (--help, --version, --collect-only, -list and similar). It is not a run, and it exits 0.
+  Not stamping, and not clearing: a help screen is not evidence about the suite in either direction. Run the suite itself to verify."
     elif [ "$EXIT_CODE" = "0" ]; then
         # mkdir here, not at the top: $VERIFIED may live in another repository's
         # .claude/, which need not exist yet. Creating it only on a real pass keeps
@@ -453,9 +461,9 @@ if echo "$COMMAND" | grep -qEi "$TEST_PATTERN"; then
         fi
         echo "$(date +%s)|$(printf '%s' "$LAST_SEGMENT" | head -c 100)|$STAMP_BASIS|$STAMP_FLAKE" > "$VERIFIED"
         if [ "$STAMP_BASIS" = inferred ]; then
-            echo "VERIFICATION STAMP: Tests/build passed (exit code INFERRED — the payload carried none). Commit gate unlocked."
+            announce "VERIFICATION STAMP: Tests/build passed (exit code INFERRED — the payload carried none). Commit gate unlocked."
         else
-            echo "VERIFICATION STAMP: Tests/build passed. Commit gate unlocked."
+            announce "VERIFICATION STAMP: Tests/build passed. Commit gate unlocked."
         fi
     else
         # "unknown" lands here on purpose. An exit code this hook cannot read is not
@@ -467,7 +475,7 @@ if echo "$COMMAND" | grep -qEi "$TEST_PATTERN"; then
         # of run-until-green. Recorded here rather than anywhere earlier because
         # this is the one branch that knows the run actually failed.
         [ "$FLAKE_OK" = yes ] && flake_record "$FLAKE_REPO" "$LAST_SEGMENT"
-        echo "VERIFICATION: Tests/build FAILED or unreadable (exit $EXIT_CODE). Stamp cleared. Fix issues before committing."
+        announce "VERIFICATION: Tests/build FAILED or unreadable (exit $EXIT_CODE). Stamp cleared. Fix issues before committing."
     fi
 fi
 

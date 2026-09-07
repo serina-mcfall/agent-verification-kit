@@ -3,6 +3,18 @@
 # The stamp is created by post-bash.sh when a recognized test/build command passes.
 # Edits clear the stamp (via edit-tracker.sh), forcing re-verification.
 
+# announce() puts a message on the ONE channel NOTE-0032 observed reaching a
+# human. Sourced defensively: if the library is missing this gate keeps working
+# and falls back to the old stderr behaviour, because a commit gate that breaks
+# over a missing MESSAGE FORMATTER would be a worse defect than the silence.
+#
+# EVERY REFUSAL IN THIS FILE IS LEFT ALONE. A block is raw text on stderr at
+# exit 2, which reaches a human already and is observed doing so. Only the
+# ALLOW path and the fail-open warnings are converted — which is the whole of
+# INC-0013: "say what authorised it" was being said to nobody.
+ANNOUNCE_LIB="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/announce.sh"
+if [ -r "$ANNOUNCE_LIB" ]; then . "$ANNOUNCE_LIB"; else announce() { printf '%s\n' "$*" >&2; }; fi
+
 INPUT=$(cat)
 # Claude Code delivers the hook payload on a SOCKET. `cat /dev/stdin` opens fd 0
 # BY PATH, and a socket cannot be opened by path — it fails with ENXIO ("No such
@@ -16,7 +28,7 @@ INPUT=$(cat)
 # An empty payload is never normal; say so on stderr, which is visible without
 # blocking the tool.
 if [ -z "$INPUT" ]; then
-  echo "verify-gate: empty payload — this hook cannot see the tool call and is not enforcing." >&2
+  announce "verify-gate: empty payload — this hook cannot see the tool call and is not enforcing."
 fi
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 
@@ -124,7 +136,7 @@ else
         echo "Restore $STAMP_LIB (it lives beside this script), then retry." >&2
         exit 2
     fi
-    echo "verify-gate: stamp resolver missing at $STAMP_LIB — this call is not a commit, so it is allowed, but the gate is NOT enforcing." >&2
+    announce "verify-gate: stamp resolver missing at $STAMP_LIB — this call is not a commit, so it is allowed, but the gate is NOT enforcing."
     exit 0
 fi
 
@@ -198,7 +210,7 @@ REPO_ROOT=""
 if [ -n "$TARGET_DIR" ]; then
     REPO_ROOT=$(git -C "$TARGET_DIR" rev-parse --show-toplevel 2>/dev/null)
     if [ -z "$REPO_ROOT" ]; then
-        echo "verify-gate: '$TARGET_DIR' (named in the command) is not a git repository — falling back to $(pwd) for the roster check." >&2
+        announce "verify-gate: '$TARGET_DIR' (named in the command) is not a git repository — falling back to $(pwd) for the roster check."
     fi
 fi
 [ -z "$REPO_ROOT" ] && REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
@@ -208,7 +220,7 @@ if [ -z "$REPO_ROOT" ]; then
   # months-long failure was silent, so a check that cannot run must SAY it did
   # not rather than look like a pass. Not a block — an unrecognised environment
   # is not evidence of a bad roster.
-  echo "verify-gate: no git repository resolves from $(pwd) — the agent-roster check did NOT run and is not enforcing here." >&2
+  announce "verify-gate: no git repository resolves from $(pwd) — the agent-roster check did NOT run and is not enforcing here."
 else
   # Which files does this commit involve? Staged, plus tracked modifications when
   # -a/--all is used, since those are staged at commit time and are not in the
@@ -518,14 +530,14 @@ if [ "$STAMP_FLAKE" = flaky ]; then
     fi
 
     # SAY WHAT AUTHORISED IT, at the moment it is relied upon.
-    echo "Verified $(( STAMP_AGE / 60 ))m ago, but FLAKY — '$STAMP_CMD' failed before it passed. Declared: $FLAKY_AUTH, and recorded in the commit. Commit allowed."
+    announce "Verified $(( STAMP_AGE / 60 ))m ago, but FLAKY — '$STAMP_CMD' failed before it passed. Declared: $FLAKY_AUTH, and recorded in the commit. Commit allowed."
     exit 0
 fi
 
 [ -n "$STAMP_CMD" ] && STAMP_CMD=" by: $STAMP_CMD"
 case "$STAMP_BASIS" in
-  observed) echo "Verified $(( STAMP_AGE / 60 ))m ago, exit code observed.${STAMP_CMD} Commit allowed." ;;
-  inferred) echo "Verified $(( STAMP_AGE / 60 ))m ago, exit code INFERRED (the payload carried none).${STAMP_CMD} Commit allowed." ;;
-  *)        echo "Verified $(( STAMP_AGE / 60 ))m ago, basis unrecorded.${STAMP_CMD} Commit allowed." ;;
+  observed) announce "Verified $(( STAMP_AGE / 60 ))m ago, exit code observed.${STAMP_CMD} Commit allowed." ;;
+  inferred) announce "Verified $(( STAMP_AGE / 60 ))m ago, exit code INFERRED (the payload carried none).${STAMP_CMD} Commit allowed." ;;
+  *)        announce "Verified $(( STAMP_AGE / 60 ))m ago, basis unrecorded.${STAMP_CMD} Commit allowed." ;;
 esac
 exit 0

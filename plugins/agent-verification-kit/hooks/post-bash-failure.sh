@@ -67,18 +67,26 @@
 
 set -u
 
+# announce() puts a message on the ONE channel NOTE-0032 observed reaching a
+# human. Sourced defensively: if the library is missing this hook keeps working
+# and falls back to the old stderr behaviour, because a verification hook that
+# breaks over a missing MESSAGE FORMATTER would be a worse defect than the
+# silence being fixed.
+ANNOUNCE_LIB="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/announce.sh"
+if [ -r "$ANNOUNCE_LIB" ]; then . "$ANNOUNCE_LIB"; else announce() { printf '%s\n' "$*" >&2; }; fi
+
 INPUT=$(cat)
 
 # An empty payload means this hook cannot see the tool call. Say so. The failure
 # mode of a silent no-op here is indistinguishable from "no test failed", which is
 # the confusion this entire kit exists to prevent.
 if [ -z "${INPUT//[[:space:]]/}" ]; then
-    echo "post-bash-failure: empty payload — this hook cannot see the tool call, so a failing test run will not clear the stamp." >&2
+    announce "post-bash-failure: empty payload — this hook cannot see the tool call, so a failing test run will not clear the stamp."
     exit 0
 fi
 
 if ! command -v jq >/dev/null 2>&1; then
-    echo "post-bash-failure: jq not found — cannot read the payload, so a failing test run will NOT clear the stamp and is NOT being recorded." >&2
+    announce "post-bash-failure: jq not found — cannot read the payload, so a failing test run will NOT clear the stamp and is NOT being recorded."
     exit 0
 fi
 
@@ -88,12 +96,12 @@ fi
 # silently preserved a stamp that a red suite should have cleared. The header of
 # this file promises an unreadable payload announces itself; it did not.
 if ! printf '%s' "$INPUT" | jq -e 'type == "object"' >/dev/null 2>&1; then
-    echo "post-bash-failure: payload is not a JSON object — cannot tell whether a test run failed, so the stamp is left standing. It may now outlive a red suite." >&2
+    announce "post-bash-failure: payload is not a JSON object — cannot tell whether a test run failed, so the stamp is left standing. It may now outlive a red suite."
     exit 0
 fi
 COMMAND=$(printf '%s' "$INPUT" | jq -r 'if (.tool_input.command | type) == "string" then .tool_input.command else empty end' 2>/dev/null)
 if [ -z "$COMMAND" ]; then
-    echo "post-bash-failure: no string .tool_input.command in the payload — this hook cannot tell what failed. If the harness has changed shape, INC-0024 is repeating." >&2
+    announce "post-bash-failure: no string .tool_input.command in the payload — this hook cannot tell what failed. If the harness has changed shape, INC-0024 is repeating."
     exit 0
 fi
 
@@ -120,7 +128,7 @@ if [ ! -r "$COMMANDS_LIB" ]; then
     # would reopen INC-0025 in silence. So: clear, and say why. The cost is that a
     # broken install wipes the stamp on any failed command, which is loud and
     # correct for a broken install.
-    echo "post-bash-failure: command classifier missing at $COMMANDS_LIB — clearing the stamp anyway, because a failure occurred and this hook cannot rule out that it was a test run." >&2
+    announce "post-bash-failure: command classifier missing at $COMMANDS_LIB — clearing the stamp anyway, because a failure occurred and this hook cannot rule out that it was a test run."
     CLEAR_ANYWAY=yes
 else
     CLEAR_ANYWAY=no
@@ -184,7 +192,7 @@ if [ -r "$STAMP_LIB" ]; then
     # repository". The resolver is never handed the raw command line.
     VERIFIED=$(stamp_path_for "$TARGET_DIR")
 else
-    echo "post-bash-failure: stamp resolver missing at $STAMP_LIB — clearing the shared path, which may not be the repository that was tested." >&2
+    announce "post-bash-failure: stamp resolver missing at $STAMP_LIB — clearing the shared path, which may not be the repository that was tested."
     VERIFIED="${CLAUDE_PROJECT_DIR:-$(pwd)}/.claude/.verified"
 fi
 REPO="${VERIFIED%/.claude/.verified}"
@@ -194,7 +202,7 @@ REPO="${VERIFIED%/.claude/.verified}"
 # missing file would reopen the fail-open this hook exists to close.
 if [ -f "$VERIFIED" ]; then
     rm -f "$VERIFIED"
-    echo "VERIFICATION: '$COMMAND' FAILED. Stamp cleared — the commit gate will ask for a passing run."
+    announce "VERIFICATION: '$COMMAND' FAILED. Stamp cleared — the commit gate will ask for a passing run."
 fi
 
 # --- INC-0024: record it, so a later pass on the same command reads as flaky ----
@@ -248,7 +256,7 @@ if [ "$CLEAR_ANYWAY" = no ] && [ "$RECORDABLE" = yes ]; then
             flake_record "$REPO" "$CMD_CORE"
         fi
     else
-        echo "post-bash-failure: flake ledger missing at $FLAKE_LIB — the stamp was cleared, but this failure is NOT recorded, so a later re-run pass will read as a first pass." >&2
+        announce "post-bash-failure: flake ledger missing at $FLAKE_LIB — the stamp was cleared, but this failure is NOT recorded, so a later re-run pass will read as a first pass."
     fi
 fi
 
