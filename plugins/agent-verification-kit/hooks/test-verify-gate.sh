@@ -69,6 +69,31 @@ echo "0. the suite is not vacuous — an unrelated command must pass:"
 gate 0 "a bare echo is allowed" "echo hello"
 gate 0 "git log --grep commit is allowed (not a commit)" "git log --grep commit"
 
+# --- INC-0033: WRITING ABOUT A COMMIT IS NOT COMMITTING ---------------------
+#
+# All three were MEASURED as blocked before this trigger changed. They are the
+# reason the wrapper practice exists: there was no way to write ABOUT a commit
+# without being refused, so commits moved into script files — and a commit in a
+# script file is invisible to this gate entirely (INC-0033, still open).
+#
+# THE FIX REMOVES THE MOTIVE, NOT THE CAPABILITY. `bash ./x.sh` is still allowed
+# and the README still says so. These controls exist so the false positives
+# cannot come back and rebuild the incentive.
+#
+# The trigger must require `git` at a COMMAND POSITION — start of the line or
+# after a shell operator — rather than anywhere in the text.
+gate 0 "writing about a commit in an echo is allowed" \
+      'echo "the git commit was late"'
+gate 0 "a --field value describing a commit is allowed" \
+      'record.sh --field w="a git commit message"'
+gate 0 "grepping for the words git commit is allowed" \
+      'grep -r "git commit" .'
+
+# The operator cases — a command position is not only the start of a line — are
+# asserted further down, at the first point where gate_in exists. Putting them
+# here silently did nothing: `gate_in: command not found` is a control that does
+# not run, which reports neither pass nor fail and is worse than one that fails.
+
 echo
 echo "1. repository scoping — the original fail-open:"
 rm -f "$A/.claude/.verified" "$B/.claude/.verified" "$box/.claude/.verified" 2>/dev/null
@@ -143,6 +168,38 @@ gate_in "$box/proj" 0 "a bare git commit inside a stamped repository is allowed"
 rm -f "$box/proj/.claude/.verified" "$box/.claude/.verified"
 gate_in "$box/proj" 2 "a bare git commit inside an UNstamped repository is refused" \
   "git commit -m 'x'"
+
+# --- INC-0033: A COMMAND POSITION IS NOT ONLY THE START OF A LINE -----------
+#
+# The trigger narrows to `git` at a command position so that writing ABOUT a
+# commit stops being refused. If it narrows to the START OF THE LINE ONLY, then
+# every chained commit walks straight through — which is the exact class of
+# defect that produced five of the six bypasses in the README, arriving through
+# a sixth door. These two are the guard on the fix.
+gate_in "$box/proj" 2 "a commit after && is still refused without a stamp" \
+  "cd $box/proj && git commit -m x"
+gate_in "$box/proj" 2 "a commit after ; is still refused without a stamp" \
+  "cd $box/proj ; git commit -m x"
+gate_in "$box/proj" 2 "a commit on a second line is still refused without a stamp" \
+  "cd $box/proj
+git commit -m x"
+
+# --- THE ADMISSION — INC-0033 IS NOT CLOSED --------------------------------
+#
+# This control asserts a HOLE, on purpose, and it must not be "fixed" by making
+# it green in the other direction without closing the incident first.
+#
+# A commit inside a script file is invisible to a trigger that reads command
+# text, so `bash ./do-commit.sh` passes with no stamp. 0.6.1 removed the MOTIVE
+# for wrapping (writing about a commit is no longer refused) and not the
+# CAPABILITY. The README's bypass table says exactly this, and a README claim
+# with no control behind it is how a README starts lying.
+#
+# WHEN INC-0033 IS EVENTUALLY CLOSED, THIS CONTROL MUST FLIP TO 2 IN THE SAME
+# COMMIT that closes it — and if it is ever seen flipping on its own, something
+# has closed the hole by accident and nobody has written down how.
+gate_in "$box/proj" 0 "a commit inside a script file is STILL allowed — INC-0033, open" \
+  "bash ./do-commit.sh"
 
 # THE ONE THAT PINS THE DEFECT ITSELF. The container is stamped and the
 # repository is not. The pre-fix code read the container's stamp and allowed the

@@ -121,7 +121,35 @@ fi
 
 if [ "$STAMP_LIB_OK" = yes ]; then
     GITOPT="$STAMP_GITOPT"
-    echo "$COMMAND" | grep -qE "git${GITOPT}[[:space:]]+commit\b" || exit 0
+    # A COMMAND POSITION, NOT A MENTION — INC-0033.
+    #
+    # This matched `git ... commit` ANYWHERE in the command text, so writing
+    # ABOUT a commit was refused. Measured before the change:
+    #
+    #   echo "the git commit was late"        exit 2   false positive
+    #   record.sh --field w="a git commit"    exit 2   false positive
+    #   grep -r "git commit" .                exit 2   false positive
+    #
+    # There was no way to write about a commit without being blocked, so commits
+    # moved into script files — and `bash ./do-commit.sh` is not text containing
+    # `git commit`, so the trigger never fires and the stamp is never checked.
+    # The workaround for the false positive disabled the true positive.
+    #
+    # NARROWING A TRIGGER IS HOW FIVE OF THE SIX BYPASSES IN THE README WERE
+    # MADE, so this moves in an uncomfortable direction on purpose. The anchor is
+    # a command position — start of a line, or after ; && || | ( { — which is
+    # where a shell would actually start a command. Not the start of the line
+    # only: `cd /x && git commit` must still block, and three controls in
+    # test-verify-gate.sh exist solely to catch that regression.
+    #
+    # Quoted text containing an operator, like `echo "; git commit"`, still
+    # matches and still blocks. That is deliberate: where mention and invocation
+    # cannot be told apart without a shell parser, prefer blocking. A false
+    # positive is an annoyance; a false negative is this incident.
+    #
+    # THIS DOES NOT CLOSE INC-0033. `bash ./x.sh` is still allowed and the README
+    # still says so. It removes the reason anyone reaches for the wrapper.
+    echo "$COMMAND" | grep -qE "(^|[;&|({])[[:space:]]*git${GITOPT}[[:space:]]+commit\b" || exit 0
 else
     # Broken install. This branch decides one thing only: refuse, or stand aside.
     # The pattern is DELIBERATELY LOOSE — without the resolver there is no shared
