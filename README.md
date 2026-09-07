@@ -510,6 +510,7 @@ and it is the reason the kit exists in this shape rather than as a tidy rewrite.
 | Then the option list was enumerated | Ten global options walked through the *fixed* trigger, including `--paginate`. `--no-pager` was in the list and `--paginate` was not — the tell that the list was built from options someone thought of. |
 | One stamp for a container of repos | Fail-open and fail-closed simultaneously, as above. |
 | Fail-closed check at the wrong scope | An `exit 2` for a missing resolver placed *above* the commit trigger blocked every Bash, Edit, Write and MCP call in two live sessions. Fail-closed is right; fail-closed on the wrong scope is a lockout with no way back in from inside the session. |
+| **A commit inside a script file — `INC-0033`, OPEN** | `bash ./do-commit.sh` is not text containing `git commit`, so the trigger never fires and **the stamp is never checked**. Measured against a repo with no stamp at all: `git commit` → exit 2, `git -C PATH commit` → exit 2, `sh -c "git commit"` → exit 2, `bash ./do-commit.sh` → **exit 0**. Worse than the five above, because **this is the workflow this project documents**: the gate blocks any Bash call merely *mentioning* `git commit`, so wrapping it in a script became routine — and the workaround for the false positive disables the true positive. |
 
 The pattern worth taking away is the fourth row: **a fix applied to the file where the defect was
 reported, and not to its twin.** When you correct one of these, grep the whole hook layer for the
@@ -597,7 +598,7 @@ what is *observed*, not what was intended.
 
 | Stage | Mechanism | State |
 |---|---|---|
-| 1 | Evidence-required completion — the stamp protocol above | **shipped**; fail-open `INC-0025` fixed and observed |
+| 1 | Evidence-required completion — the stamp protocol above | **shipped**; fail-open `INC-0025` fixed and observed. **Does NOT enforce when the commit runs from inside a script file — `INC-0033`, open, and that is the workflow this project has been using.** |
 | 2 | Test-modification guard — hook + CI twin | **shipped** |
 | 3 | `flake-triage` — a re-run pass is a distinct state from a first pass | **shipped and observed**; bypass stated below |
 | 4 | `mutation-gate` — diff-scoped, advisory | planned |
