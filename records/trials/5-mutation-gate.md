@@ -2,7 +2,9 @@
 
 **Phase** 4 · **Started** 2026-09-06 (UTC; morning of 2026-09-07 NZ) · **Closed** — open
 **Where** `serina-mcfall/agent-verification-kit`, branch `spike/stage4-payload`
-**Verdict** — **not yet reached.** Run 1 only. No mechanism exists.
+**Verdict** — **not yet reached.** Run 1 (harness measurement) and Run 1b (evidence about the
+premise, from another repository). **No mechanism exists.** Run 1b is deliberately not numbered
+Run 2: Run 2 is the live exercise of a built mechanism, and there is nothing yet to exercise.
 
 > This file was opened at the measurement spike, before any design, which is what `CHG-0008`
 > requires. It is not evidence that anything works. It is evidence about the harness.
@@ -83,7 +85,101 @@ the second question is the one that matters for an advisory mechanism.**
 
 ### Run 2 — the live exercise, BEFORE the pull request leaves draft
 
-Not reached. No mechanism exists yet.
+Not reached. **No mechanism exists yet, and nothing below is one.**
+
+### Run 1b — evidence about the premise, from a hand-built matrix in another repository
+
+**Added 2026-09-08. This is not the mechanism and carries no verdict.** What it is: the first
+live evidence that the thing this mechanism is meant to catch actually happens, gathered by
+hand-mutating one script rather than by any gate. `mutation-gate` still sits at **verdict not
+reached**.
+
+The distinction matters. What ships here is meant to be *diff-scoped, automatic and advisory*.
+What produced the evidence below is a 13-mutation matrix, written by hand, aimed at one script,
+run deliberately. It answers *"is the premise sound?"* and says nothing about *"does an
+automatic gate pay for itself?"*
+
+Where: `serina-skills`, reconciling two lineages of `verdict.sh` into one. Committed there as
+`test/mutate-verdict.py` and `test/mutate-runner.sh`.
+
+#### 1. The target defect class is real, and here is a dated instance
+
+This trial's own opening says the mechanism exists to catch *"an assertion weakened without
+changing the assertion count — `assert_eq!(a, 5)` becoming `assert_eq!(a, a)` — which stage 2
+sees as a change and never as a weakening."* That was a hypothesis. It is now an observation:
+
+> A control named *"a tab-indented PASSING command runs and is recorded in full"* asserted an
+> exit code and a recorded string, and **not execution**. A build that recorded the command
+> without running it passed it. The change was **declared** to `guard-test-changes.sh`, which
+> allowed it correctly — the declaration was honest, the assertion count was unchanged, and the
+> weakening was invisible to a diff.
+
+Mutation found it: replacing the suite execution with a no-op left that control green while
+`T1` and `J` went red. Two further instances in the same session — a control accepting an
+instant refusal as proof of deadline enforcement, and one asserting a property of its own
+environment rather than of the code.
+
+**This is the strongest argument for the mechanism so far, and it is the argument stage 2 cannot
+make for itself.** It is also confirmation of the stated blind spot in `REV-0020`, not a fault
+found in the guard.
+
+#### 2. Cost, measured
+
+| | |
+|---|---|
+| Suite under test | 88 controls |
+| One suite run | 19s |
+| 13-mutation matrix | 260s |
+| Per mutation | 20s |
+
+Roughly *n* × the suite. That is affordable deliberately and **unaffordable per edit**, which is
+what the ladder's governing rule already predicts: this belongs at the merge gate or below, never
+in the inner loop. A diff-scoped gate would run far fewer than 13, so 260s is an upper bound for
+a script this size, not a projection.
+
+#### 3. A design requirement Run 1 could not have found: the harness must prove it mutated
+
+The first version of this matrix split its arguments on a **NUL byte**, which bash cannot pass.
+The split raised, **no mutation was applied**, and all five controls reported `PASS`. It was
+recorded as a successful mutation run.
+
+> **A mutation gate that fails to mutate reports a perfect score.** Its failure mode is
+> indistinguishable from total success, and it fails in the reassuring direction.
+
+Both committed harnesses now abort loudly when an anchor is missing. **Any mechanism that ships
+here needs the same property as an acceptance criterion**, and it is not obvious from the outside
+— a survivor count of zero reads as good news.
+
+#### 4. A false-positive source that will decide this mechanism's verdict
+
+This trial's rule is that `false_positives` decides most verdicts. Here is one that a naive
+diff-scoped gate would produce on this codebase:
+
+> `verdict.sh` calls `json.loads(text)` after encoding, to refuse writing a file it cannot read
+> back. Removing it changes **no** control's outcome, so mutation reports it as a survivor — an
+> uncovered line. It is not a defect. The guard fires only on output `json.dumps` cannot produce,
+> so it is **behaviourally invisible while the encoder is correct**.
+
+Measured, because the obvious reading is wrong in an interesting way: with the encoder replaced
+by naive interpolation, a crafted reason still read back as `READY` and still opened the gate
+**with the guard present** — a duplicate-key document is valid JSON. So the guard does not defend
+what it appears to; the escaping does.
+
+**Consequence for the design.** Defence-in-depth guards whose precondition cannot arise are
+*unkillable by construction*, and a gate that reports them as survivors is crying wolf on exactly
+the code most carefully written. The matrix handles it with an allowlist carrying a demonstrated
+justification, which fails if an allowlisted mutant ever turns out killable. Whether that is
+tolerable at gate scale is an open question — it is hand-maintained, and hand-maintained
+allowlists rot.
+
+#### What this does NOT establish
+
+- Nothing about **diff-scoping**. Every mutation here was chosen by hand against a whole file.
+- Nothing about **`mutmut` or `cargo mutants`** specifically; no tool was used.
+- Nothing about **Python or Rust**. The subject was bash, which neither tool covers.
+- Nothing about **fleet cost**, one repository and one machine.
+- Nothing about whether survivors get **read** when reported — Addendum 1 answers the channel
+  question, not the attention question.
 
 ### What the live run could not reach
 
