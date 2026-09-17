@@ -1,7 +1,7 @@
 # Design — which repository owns the hooks that actually run
 
 **Refs** `INC-0034`, `INC-0033`, `INC-0031`, `INC-0014`, `NOTE-0037` · **Branch** `docs/verify-gate-findings-from-reconciliation` · **Started** 2026-09-17 (UTC)
-**Status** one file deployed, the governing decision NOT taken
+**Status** decided 2026-09-17 — **the kit owns them**. Eight files deployed and matching; two follow-ups open
 
 > `INC-0034` closed its own record with *"deciding which copy should exist is a workspace question,
 > not a change to this repository."* This document is that question, written down with the
@@ -116,6 +116,31 @@ default.
 copies drifting with nothing watching. Whichever is chosen needs a check that compares deployed
 bytes against the owning repository and fails loudly — the kit gates commits, test edits and flaky
 passes, and does not yet gate its own deployment.
+
+### Decided 2026-09-17 — Option A, the kit owns them
+
+Chosen by Serina. What decided it was not tidiness: the deployed `edit-tracker.sh` carried a live
+fail-open defect, and the only thing the other lineage held uniquely was a convenience feature its
+own trial had already cut on purpose. Weighing a stamp cleared on the wrong repository against
+elapsed-time reporting is not a close call.
+
+`post-bash.sh`, `edit-tracker.sh`, `classify-test-commands.sh` and `flake-ledger.sh` deployed the
+same day, after enumerating the dependency closure first — the last two are libraries the first two
+source, and deploying without them would have made the kit's own code announce that flake detection
+was not enforcing. All eight files under `~/.claude/hooks` now match the kit's `main` byte for byte.
+
+Verified end to end rather than by file comparison alone: the stamp was deleted and re-earned by the
+newly deployed `post-bash.sh`, and the suite ran green against exactly these bytes.
+
+**Open, and deliberately not done here:**
+
+1. **The deployment check.** Nothing yet compares live bytes against the owning repository. Until it
+   exists this decision is a fact about one afternoon, not a property of the system, and the next
+   drift is found the same way this one was — by accident, ten days late.
+2. **Retiring `.claude/hooks/global/` in `serina-learning`.** Left standing on purpose. That
+   repository has assessments due 2026-09-18 and three working copies open; a commit there this week
+   buys nothing, because the copies are inert the moment nothing deploys from them. It is a tidy-up,
+   and tidy-ups do not go in front of deadlines.
 
 ## The trap this leaves behind until it is decided
 
