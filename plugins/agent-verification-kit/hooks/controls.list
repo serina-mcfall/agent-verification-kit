@@ -24,3 +24,4 @@ test-check-plugin-version.sh
 test-check-record.sh
 test-post-bash-failure.sh
 test-announce.sh
+test-check-deployment.sh

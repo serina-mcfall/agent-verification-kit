@@ -1,0 +1,33 @@
+# Runtime artefacts this kit's own hooks write into the repository they gate.
+#
+#   .claude/.verified      the verification stamp
+#   .claude/.failed-runs   the flake ledger's record of failures
+#   .claude/.test-change   declarations authorising a test edit, 30-minute TTL
+#   .claude/.flaky         a pass recorded as flaky rather than clean
+#   .claude/.edit-count    edits seen since the last stamp
+#
+# WHY THIS FILE EXISTS, and it is not tidiness.
+#
+# COMMITTING .verified HANDS THE NEXT CLONE A GATE THAT IS ALREADY OPEN.
+# verify-gate.sh reads the stamp's age from its MTIME — `stat -c %Y`, not the
+# timestamp written inside the file — and git sets mtime to checkout time. So a
+# committed stamp does not arrive stale and refused, which is what it looks like
+# it would do. It arrives SECONDS OLD. The first commit anyone makes after cloning
+# is allowed without running anything, attesting to a suite that last passed on a
+# different machine, possibly months earlier.
+#
+# That is this kit's own worst failure shape — a gate reporting a pass it did not
+# earn, failing in the reassuring direction — shipped in the repository that exists
+# to document it. Until 2026-09-17 nothing stopped a `git add -A` from doing it.
+#
+# A GLOB, NOT THE EXPLICIT LIST, and that is the opposite of controls.list on
+# purpose. That list names suites which must EXIST, where a glob cannot tell you
+# one has gone missing. This excludes files which must NOT be committed, where the
+# failure mode is a NEW artefact nobody remembered to add to the list. The glob is
+# the fail-closed direction here and an explicit list is not. The names above are a
+# comment for the reader, not the mechanism.
+#
+# Scoped to dotfiles so a future .claude/agents/ or .claude/settings.json stays
+# committable — check-models.sh validates agent definitions in a commit, so that
+# directory is expected to be tracked one day.
+.claude/.*
