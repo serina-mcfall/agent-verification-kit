@@ -108,7 +108,41 @@ add() { problems="${problems}${problems:+
 while IFS= read -r name; do
     [ -n "$name" ] || continue
     live="$DEPLOY_DIR/$name"
-    [ -e "$live" ] || continue
+
+    # THREE STATES AT A DEPLOY PATH, NOT TWO.
+    #
+    # This was `[ -e "$live" ] || continue`, and `-e` FOLLOWS a symlink — it is
+    # false when the target is gone. So a hook deployed as a symlink whose target
+    # had vanished was indistinguishable from a hook nobody ever deployed, and took
+    # the same silent `continue`. It was never hashed, never named, never counted.
+    #
+    # Reproduced during adjudication against the real deployed hook set:
+    #
+    #   verify-gate.sh alone dangling → "checked 7 deployed file(s) … all match", 0
+    #   all eight dangling            → "nothing deployed, nothing to check",      0
+    #
+    # Eight symlinks physically present at those paths, the commit gate not running,
+    # and this script calling it clean. THAT IS INC-0014 EXACTLY — a branch checkout
+    # dangled all eight global hook symlinks and the verification layer failed open,
+    # silently, for about 102 minutes. The check written to catch silent deployment
+    # failure could not see the silent deployment failure already in the record.
+    #
+    # `-L` is the distinction that was missing, and it must be tested BEFORE `-e`,
+    # because a dangling link satisfies `-L` and fails every other test.
+    #
+    #   absent entirely   not deployed. A legitimate choice — controls 4 and 6.
+    #   dangling symlink  DEPLOYED AND BROKEN. Never a legitimate state.
+    #   present           compare it.
+    #
+    # Not counted in `checked`, because nothing was compared, and a count that
+    # includes files it never read is the same lie in a smaller font.
+    if [ ! -e "$live" ]; then
+        if [ -L "$live" ]; then
+            add "$name — DANGLING SYMLINK. Deployed, but its target does not exist, so this hook cannot run. This is not the same as 'not deployed'."
+        fi
+        continue
+    fi
+
     deployed="${deployed}${name}
 "
     checked=$((checked + 1))
