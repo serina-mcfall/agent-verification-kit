@@ -91,6 +91,12 @@ if [ ! -d "$DEPLOY_DIR" ]; then
     exit 0
 fi
 
+# Somewhere to land the shipped bytes so the read that produces them can be tested
+# for success. Created after the cheap refusals above, so a wrong ref or a missing
+# deployment costs nothing.
+SCRATCH=$(mktemp -d) || die "could not create a temporary directory to read the shipped copies into."
+trap 'rm -rf "$SCRATCH"' EXIT
+
 problems=""
 checked=0
 deployed=""
@@ -115,9 +121,36 @@ while IFS= read -r name; do
     # Read through a symlink deliberately: check-models.sh is deployed as one, and
     # what runs is the content at the far end.
     live_sum=$(sha1sum < "$live" | cut -d' ' -f1)
-    ship_sum=$(git -C "$ROOT" show "$REF:${LIST_PATH}$name" 2>/dev/null | sha1sum | cut -d' ' -f1)
 
-    [ -n "$ship_sum" ] || { add "$name — could not read the shipped copy at $REF."; continue; }
+    # THE READ IS CHECKED, NOT INFERRED FROM ITS OUTPUT.
+    #
+    # This was `ship_sum=$(git show … | sha1sum | cut …)` guarded by
+    # `[ -n "$ship_sum" ]`, and that guard could never fire. sha1sum of EMPTY input
+    # is da39a3ee5e6b4b0d3255bfef95601890afd80709 — a fixed, non-empty, 40-character
+    # string — so a failed `git show` produced a perfectly respectable-looking hash
+    # and the emptiness test was true unconditionally.
+    #
+    # Reproduced end to end during adjudication rather than argued: with the shipped
+    # blob deleted from the object store and a ZERO-BYTE file deployed, both sides
+    # hashed to that same constant, they matched, and this script printed
+    #
+    #   check-deployment: checked 2 deployed file(s) … — all match.   EXIT 0
+    #
+    # on a file it had never read. That is the exact outcome the header above
+    # forbids in capitals, produced by the guard written to prevent it.
+    #
+    # The lesson generalises past this line: a command's SUCCESS cannot be inferred
+    # from the shape of what came out of the pipe, because every stage downstream of
+    # the failure still runs and still produces well-formed output. Ask the command.
+    #
+    # A temporary file rather than a command substitution, because `$(…)` strips
+    # trailing newlines — the hash of the captured text would differ from the hash
+    # of the file for every hook ending in one, which is all of them.
+    if ! git -C "$ROOT" show "$REF:${LIST_PATH}$name" > "$SCRATCH/ship" 2>/dev/null; then
+        add "$name — COULD NOT READ the shipped copy at $REF, so no comparison was made. This is not a pass."
+        continue
+    fi
+    ship_sum=$(sha1sum < "$SCRATCH/ship" | cut -d' ' -f1)
 
     if [ "$live_sum" != "$ship_sum" ]; then
         add "$name — DRIFT. Deployed bytes differ from $REF. The deployed copy is what enforces."

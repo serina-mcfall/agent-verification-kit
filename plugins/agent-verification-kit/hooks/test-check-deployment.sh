@@ -133,12 +133,30 @@ run "$D"
 
 echo
 echo "5. TEST SUITES ARE NOT DEPLOYED ARTEFACTS — their absence is never a finding:"
+#
+# THE FIXTURE MUST GIVE THE EXCLUSION SOMETHING TO EXCLUDE.
+#
+# This control used to deploy only verify-gate.sh and announce.sh and then assert
+# that test-verify-gate.sh was absent from the output. It could not fail. The file
+# it grepped for was never deployed, so the drift loop skipped it at
+# `[ -e "$live" ] || continue` and nothing sourced it — the assertion checked for a
+# string the fixture gave the code no way to emit, whether the exclusion worked,
+# was broken, or was deleted outright. Adjudication deleted `grep -vE '^test-'`
+# from the implementation and the suite still reported 18 passed, 0 failed.
+#
+# So the suite is now DEPLOYED, and deployed DRIFTED — its bytes differ from the
+# ref. With the exclusion present it is never compared and never named. Remove the
+# exclusion and it is compared, it differs, and it is reported as DRIFT — which
+# fails this control. That is the mutation the old fixture survived.
 KIT=$(new_kit suites); D="$box/suites-deploy"
-deploy "$KIT" "$D" verify-gate.sh announce.sh
+deploy "$KIT" "$D" verify-gate.sh announce.sh test-verify-gate.sh
+printf '%s\n' '#!/usr/bin/env bash' 'echo a DIFFERENT control suite' > "$D/test-verify-gate.sh"
 run "$D"
 printf '%s' "$OUT" | grep -q "test-verify-gate.sh" \
-    && bad "test-*.sh is excluded from the comparison" "$OUT" \
-    || ok "test-*.sh is excluded from the comparison"
+    && bad "a deployed, drifted test-*.sh is excluded from the comparison" "$OUT" \
+    || ok "a deployed, drifted test-*.sh is excluded from the comparison"
+[ "$RC" = 0 ] && ok "and its drift does not fail the run" \
+              || bad "and its drift does not fail the run" "exit $RC: $OUT"
 
 echo
 echo "6. NO DEPLOYMENT — an adopter who deploys nothing is not broken:"
@@ -171,6 +189,38 @@ mkdir -p "$KIT/$PREFIX"; cp "$SUT" "$KIT/$PREFIX/check-deployment.sh"
 run "$D"
 [ "$RC" = 3 ] && ok "a ref shipping NO hooks exits 3 — a check of nothing is not a pass" \
               || bad "a ref shipping NO hooks exits 3 — a check of nothing is not a pass" "exit $RC: $OUT"
+
+echo
+echo "7b. AN UNREADABLE SHIPPED COPY IS NOT A MATCH:"
+#
+# THE BLOCKER THIS SUITE DID NOT HOLD. The guard for this path existed but could
+# never fire: it tested `[ -n "$ship_sum" ]`, and sha1sum of EMPTY input is
+# da39a3ee5e6b4b0d3255bfef95601890afd80709 — fixed and non-empty — so a failed
+# `git show` still produced a respectable-looking hash.
+#
+# The fixture reproduces the case that makes it dangerous rather than merely wrong:
+# the shipped blob is removed from the object store AND the deployed file is
+# ZERO BYTES. Both sides then hash to that same constant, they compare equal, and
+# the unfixed script reports "all match" at exit 0 on a file it never read.
+#
+# A drifted deployed file would NOT catch this — the hashes would differ and it
+# would be reported as DRIFT, a wrong diagnosis that still fails the run. The empty
+# deployed file is what turns a failed read into a green one, so that is what this
+# control deploys.
+KIT=$(new_kit unreadable); D="$box/unreadable-deploy"
+deploy "$KIT" "$D" verify-gate.sh announce.sh
+: > "$D/verify-gate.sh"                       # zero bytes, hashes to the empty-input constant
+blob=$(git -C "$KIT" rev-parse "main:$PREFIX/verify-gate.sh" 2>/dev/null)
+rm -f "$KIT/.git/objects/${blob:0:2}/${blob:2}"
+run "$D"
+if [ "$RC" -ne 0 ]; then
+    ok "an unreadable shipped copy FAILS rather than reporting a match"
+else
+    bad "an unreadable shipped copy FAILS rather than reporting a match" "exit $RC: $OUT"
+fi
+printf '%s' "$OUT" | grep -qi "could not read" \
+    && ok "and it says it could not READ it, not that it drifted" \
+    || bad "and it says it could not READ it, not that it drifted" "$OUT"
 
 echo
 echo "8. THE SOURCE IS THE REF, NOT THE WORKING TREE:"
