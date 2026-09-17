@@ -542,6 +542,41 @@ run a subset — a partial green is a wrong claim, an error is a correct one.
 They run on every push — see the badge-less truth in
 [Actions](https://github.com/serina-mcfall/agent-verification-kit/actions).
 
+### `make test` also checks that the deployed copies are the shipped ones
+
+`make test` runs the suites, then runs `check-deployment.sh`, which compares the hooks under
+`~/.claude/hooks` against the ones this kit ships on `main`. **A CI runner deploys nothing, so this
+step is local only** — it exits 0 wherever there is no deployment, which is every adopter using the
+plugin rather than a copied-out layout.
+
+It exists because `INC-0033` merged on 2026-09-07 and governed nothing on the author's machine until
+2026-09-17. Ten days, across concurrent sessions, every one of them gated by a `verify-gate.sh` from
+a different repository — not stale so much as *current in the wrong lineage*. It was found by
+accident, and this kit had nothing comparing the copy that **enforces** against the copy it
+**ships**.
+
+Two failures are in scope, and the second is the one that nearly got missed:
+
+| | |
+|---|---|
+| **drift** | a deployed file whose bytes differ from `main` |
+| **absence** | a deployed hook that sources a sibling which was never deployed |
+
+Absence matters because these hooks resolve siblings with `dirname`/`readlink` and then **fall back
+rather than fail**. A missing library does not error; it degrades into the channel `NOTE-0032`
+measured as reaching nobody. On 2026-09-17 `announce.sh` was absent from the deploy directory
+entirely, and the gate would have looked fixed while announcing into the void.
+
+When it fires, it names each file and prints the command to refresh it. Deploy the **closure**, not
+the file.
+
+**The source of truth is a committed ref, not the working tree** — so an in-progress hook edit never
+turns the suite red, and a merged-but-undeployed fix always does. A control that is red during
+ordinary work is a control that gets switched off, which is `INC-0033`'s own lesson: there, the
+documented workflow *was* the bypass.
+
+Background and the ownership decision: `records/designs/hook-deployment-lineage.md`.
+
 ### Naming, and why it is load-bearing
 
 **Every file named `test-*` is a control suite. Nothing else is.** Implementations are named for
@@ -556,6 +591,7 @@ what they do:
 | `flake-ledger.sh` | `test-flake-ledger.sh` |
 | `check-flaky-trailers.sh` | `test-check-flaky-trailers.sh` |
 | `check-controls.sh` | `test-check-controls.sh` |
+| `check-deployment.sh` | `test-check-deployment.sh` |
 
 That invariant was **not** true until 2026-09-04. The hook and the classifier were called
 `test-guard.sh` and `test-patterns.sh`, which meant a `test-*.sh` glob ran them as suites — they

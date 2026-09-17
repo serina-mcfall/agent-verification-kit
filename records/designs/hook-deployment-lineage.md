@@ -134,9 +134,30 @@ newly deployed `post-bash.sh`, and the suite ran green against exactly these byt
 
 **Open, and deliberately not done here:**
 
-1. **The deployment check.** Nothing yet compares live bytes against the owning repository. Until it
-   exists this decision is a fact about one afternoon, not a property of the system, and the next
-   drift is found the same way this one was — by accident, ten days late.
+1. ~~**The deployment check.**~~ **Built 2026-09-17** — `check-deployment.sh`, 18 controls in
+   `test-check-deployment.sh`, run by `make test` after the suites. It catches drift and the
+   silent-degradation case of a sourced sibling that was never deployed. Verified against the real
+   artefacts rather than fixtures alone: run against the deployment as it stood that morning,
+   reconstructed from the backups, it reports all three drifted files; run against a
+   `verify-gate.sh`-without-`announce.sh` layout, it names the missing sibling. `make test` exits
+   non-zero in both cases, so the stamp is not earned and the commit is refused.
+
+   Local only, deliberately: a CI runner deploys nothing and would exit 0 on an empty answer every
+   time, which reads as coverage it does not have.
+
+   What it does **not** do is check the plugin cache under `~/.claude/plugins/cache/`, which
+   `INC-0034` observed also firing. Measured on 2026-09-17 before assuming that was a gap worth
+   closing the same way: the cache holds **six** versions — 0.1.0, 0.4.0, 0.5.1, 0.5.2, 0.6.0,
+   0.6.1 — and `main` ships 0.6.1, whose cached copy matches it byte for byte. The marketplace
+   checkout matches too.
+
+   So the active plugin copy is current, and the five older ones differ from `main` **correctly**:
+   they are pinned releases, not deployments. Pointing this check at them reports four or five
+   drifted files each, and every one of those is a false positive. A cache check is therefore a
+   different mechanism, not a wider glob on this one — it would have to resolve which version is
+   active and compare against **that version's tag**. Left undone deliberately rather than bolted
+   on, because a check that cries wolf on correctly-pinned releases is the false-positive source
+   the mutation trial already named as what decides a mechanism's verdict.
 2. **Retiring `.claude/hooks/global/` in `serina-learning`.** Left standing on purpose. That
    repository has assessments due 2026-09-18 and three working copies open; a commit there this week
    buys nothing, because the copies are inert the moment nothing deploys from them. It is a tidy-up,
